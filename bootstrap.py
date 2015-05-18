@@ -50,6 +50,7 @@ Command Line Options
 --crate-index <path>   path to where crates.io index shoudl be cloned
 --no-clone             don't clone crates.io index, --crate-index must point to existing clone.
 --no-clean             don't remove the folders created during bootstrapping.
+--download             only download the crates needed to bootstrap cargo.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
@@ -104,6 +105,7 @@ import dulwich.porcelain as git
 
 TARGET = None
 HOST = None
+GRAPH = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
@@ -695,7 +697,7 @@ class Crate(object):
         return self._resolved
 
     @dbgCtx
-    def resolve(self, tdir, idir):
+    def resolve(self, tdir, idir, graph=None):
         global CRATES
         global UNRESOLVED
 
@@ -737,6 +739,9 @@ class Crate(object):
                     if CRATES.has_key(str(dcrate)):
                         dcrate = CRATES[str(dcrate)]
                     UNRESOLVED.append(dcrate)
+                    if graph is not None:
+                        print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
+
                 except:
                     dcrate = None
 
@@ -1120,6 +1125,10 @@ def args_parser():
                         help="skip cloning crates index, --target-dir must point to an existing clone of the crates index")
     parser.add_argument('--no-clean', action='store_true',
                         help="don't delete the target dir and crate index")
+    parser.add_argument('--download', action='store_true',
+                        help="only download the crates needed to build cargo")
+    parser.add_argument('--graph', action='store_true',
+                        help="output a dot graph of the dependencies")
     return parser
 
 @idnt
@@ -1185,6 +1194,10 @@ if __name__ == "__main__":
         cargo_crate = Crate(name, ver, deps, args.cargo_root, build)
         UNRESOLVED.append(cargo_crate)
 
+        if args.graph:
+            GRAPH = open(os.path.join(args.target_dir, 'deps.dot'), 'wb')
+            print >> GRAPH, "digraph %s {" % name
+
         # resolve and download all of the dependencies
         print ''
         print '===================================='
@@ -1192,7 +1205,15 @@ if __name__ == "__main__":
         print '===================================='
         while len(UNRESOLVED) > 0:
             crate = UNRESOLVED.pop(0)
-            crate.resolve(args.target_dir, args.crate_index)
+            crate.resolve(args.target_dir, args.crate_index, GRAPH)
+
+        if args.graph:
+            print >> GRAPH, "}"
+            GRAPH.close()
+
+        if args.download:
+            print "done downloading..."
+            sys.exit(0)
 
         # build cargo
         print ''
