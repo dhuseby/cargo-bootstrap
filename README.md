@@ -64,14 +64,14 @@ to the value of the `--target` option when not specified.
 Examples
 ========
 
-To bootstrap Cargo on (Bitrig)[https://bitrig.org] I followed these steps:
+To bootstrap Cargo on [Bitrig](https://bitrig.org) I followed these steps:
 
-* Cloned this [bootstrap script repo](https://github.com/dhuseby/cargo-bootstra)
+* Cloned this [bootstrap script repo](https://github.com/dhuseby/cargo-bootstrap)
 to `/tmp/bootstrap`.
 * Cloned the [crates.io index](https://github.com/rust-lang/crates.io-index)
 to `/tmp/index`.
 * Created a target folder, `/tmp/out`, for the output.
-* Cloned the (Cargo)[https://github.com/rust-lang/cargo] repo to `/tmp/cargo`.
+* Cloned the [Cargo](https://github.com/rust-lang/cargo) repo to `/tmp/cargo`.
 * Copied the bootstrap.py script to the cargo repo root.
 * Ran the bootstrap.py script like so:
 ```sh
