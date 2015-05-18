@@ -78,7 +78,11 @@ to `/tmp/index`.
 ./bootstrap.py --crate-index /tmp/index --target-dir /tmp/out --no-clone --no-clean --target x86_64-unknown-bitrig
 ```
 
-After the script completed, there is a Cargo executable named `cargo-0_2_0` in
+After the script completes, there is a Cargo executable named `cargo-0_2_0` in
 `/tmp/out`.  That executable can then be used to bootstrap Cargo from source by
 specifying it as the `--local-cargo` option to Cargo's `./configure` script.
+
+```sh
+./configure --local-cargo=/tmp/out/cargo-0_2_0
+```
 
