@@ -6,10 +6,10 @@ Cargo binary for the purposes of bootstrapping itself on a new platform for
 which cross-compiling isn't possible.  I wrote this specifically to bootstrap
 Cargo on [Bitrig](https://bitrig.org).  Bitrig is a fork of OpenBSD that uses
 clang/clang++ and other BSD licensed tools instead of GNU licensed software.
-Cross compiling from another platform is extremely difficult because of the 
+Cross compiling from another platform is extremely difficult because of the
 alternative toolchain Bitrig uses.
 
-With this script, all that should be necessary to run this is a working Rust 
+With this script, all that should be necessary to run this is a working Rust
 toolchain, Python, and Git.
 
 This script will not set up a full cargo cache or anything.  It works by
@@ -48,6 +48,8 @@ Command Line Options
 --crate-index <path>   path to where crates.io index shoudl be cloned
 --no-clone             don't clone crates.io index, --crate-index must point to existing clone.
 --no-clean             don't remove the folders created during bootstrapping.
+--download             only download the crates needed to bootstrap cargo.
+--graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.

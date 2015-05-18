@@ -51,6 +51,7 @@ Command Line Options
 --no-clone             don't clone crates.io index, --crate-index must point to existing clone.
 --no-clean             don't remove the folders created during bootstrapping.
 --download             only download the crates needed to bootstrap cargo.
+--graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
