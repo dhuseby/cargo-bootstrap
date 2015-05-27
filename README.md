@@ -88,3 +88,16 @@ specifying it as the `--local-cargo` option to Cargo's `./configure` script.
 ./configure --local-cargo=/tmp/out/cargo-0_2_0
 ```
 
+Notes
+=====
+
+### FreeBSD
+
+Make sure you do the following:
+* Install py27-pip package
+** Use pip to install pytoml and dulwich python modules
+* Install ca_root_nss package
+** Run: ln -s /usr/local/share/certs/ca-root-nss.crt /etc/ssl/cert.pem
+* Install openssl, libssh2, libgit2 packages
+* Install gmake for building cargo once you've bootstrapped a local cargo with
+  this script.

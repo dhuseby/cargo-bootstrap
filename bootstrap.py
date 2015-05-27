@@ -589,27 +589,29 @@ def test_semver():
 
 class Runner(object):
 
-    def __init__(self, c, e):
+    def __init__(self, c, e, cwd=None):
         self._cmd = c
         if type(self._cmd) is not list:
             self._cmd = [self._cmd]
         self._env = e
         self._output = []
         self._returncode = 0
+        self._cwd = cwd
 
     def __call__(self, c, e):
         cmd = self._cmd + c
         env = dict(self._env, **e)
-        dbg(' env: %s' % e)
+        #dbg(' env: %s' % e)
         dbg(' '.join(cmd))
 
         proc = subprocess.Popen(cmd, env=env, \
-                                stdout=subprocess.PIPE)
+                                stdout=subprocess.PIPE, cwd=self._cwd)
         while proc.poll() is None:
             l = proc.stdout.readline().rstrip('\n')
-            self._output.append(l)
-            dbg(l)
-            sys.stdout.flush()
+            if len(l) > 0:
+                self._output.append(l)
+                dbg(l)
+                sys.stdout.flush()
         self._returncode = proc.wait()
         return self._output
 
@@ -879,7 +881,7 @@ class Crate(object):
             # queue up the build script runner
             if b['type'] == 'build_script':
                 bcmd = os.path.join(out_dir, 'build_script_%s-%s' % (b['name'], v))
-                cmds.append({'name':b['name'], 'env_key':match, 'cmd':BuildScriptRunner(bcmd, env)})
+                cmds.append({'name':b['name'], 'env_key':match, 'cmd':BuildScriptRunner(bcmd, env, self._dir)})
 
         print ''
         dbg('Building %s (needed by: %s)' % (str(self), str(by)))
@@ -901,10 +903,10 @@ class Crate(object):
             for k,v in e2.iteritems():
                 self._env['DEP_%s_%s' % (key.upper(), k.upper())] = v
 
-            dbg(' cmd: %s' % bcmd)
-            dbg(' env: %s' % benv)
-            dbg('denv: %s' % self._env)
-            print ''
+            #dbg(' cmd: %s' % bcmd)
+            #dbg(' env: %s' % benv)
+            #dbg('denv: %s' % self._env)
+            #print ''
 
         BUILT[str(self)] = str(by)
         return ({'name':self.name(), 'lib':output}, self._env)
@@ -968,6 +970,7 @@ def dl_and_check_crate(tdir, name, ver, cksum):
 def crate_info_from_toml(cdir):
     try:
         with open(os.path.join(cdir, 'Cargo.toml'), 'rb') as ctoml:
+            #import pdb; pdb.set_trace()
             cfg = toml.load(ctoml)
             build = []
             p = cfg.get('package',cfg.get('project', {}))
@@ -1055,7 +1058,11 @@ def crate_info_from_toml(cdir):
                     if v.get('version', None) is None:
                         deps.append({'name':k, 'path':os.path.join(cdir, v['path']), 'local':True, 'req':0})
                     else:
-                        deps.append({'name':k, 'path': v['path'], 'req':v['version']})
+                        ftrs = v.get('features',[])
+                        deps.append({'name':k, 'path': v['path'], 'req':v['version'], 'features':ftrs})
+                else:
+                    ftrs = v.get('features',[])
+                    deps.append({'name':k, 'req':v['version'], 'features':ftrs})
 
             return (name, ver, deps, build)
 
