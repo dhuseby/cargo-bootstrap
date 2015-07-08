@@ -1003,7 +1003,7 @@ def crate_info_from_toml(cdir):
             bmain = False
             if bf is not None:
                 build.append({'type':'build_script', \
-                              'path':bf, \
+                              'path':[ bf ], \
                               'name':name.replace('-','_'), \
                               'links': lnks, \
                               'overrides': boverrides})
@@ -1016,7 +1016,7 @@ def crate_info_from_toml(cdir):
                 l['type'] = 'lib'
                 l['links'] = lnks
                 if l.get('path', None) is None:
-                    l['path'] = 'lib.rs'
+                    l['path'] = [ 'lib.rs' ]
                 build.append(l)
                 bmain = True
 
@@ -1026,7 +1026,7 @@ def crate_info_from_toml(cdir):
                 bins = [bins]
             for b in bins:
                 if b.get('path', None) is None:
-                    b['path'] = os.path.join('bin', '%s.rs' % b['name'])
+                    b['path'] = [ os.path.join('bin', '%s.rs' % b['name']), os.path.join('bin', 'main.rs'), '%s.rs' % b['name'], 'main.rs' ]
                 build.append({'type': 'bin', \
                               'name':b['name'], \
                               'path':b['path'], \
@@ -1038,14 +1038,25 @@ def crate_info_from_toml(cdir):
                 build.append({'type':'lib', 'path':'lib.rs', 'name':name.replace('-','_')})
 
             for b in build:
-                bpath = os.path.join(cdir, b['path'])
-                if not os.path.isfile(bpath):
-                    bpath = os.path.join(cdir, 'src', b['path'])
-                    if os.path.isfile(bpath):
-                        b['path'] = os.path.join('src', b['path'])
-                    else:
-                        import pdb; pdb.set_trace()
-                        raise RuntimeError('could not find %s to build in %s', (build, cdir))
+                # make sure the path is a list of possible paths
+                if type(b['path']) is not list:
+                    b['path'] = [ b['path'] ]
+                bin_paths = []
+                for p in b['path']:
+                    bin_paths.append(os.path.join(cdir, p))
+                    bin_paths.append(os.path.join(cdir, 'src', p))
+
+                found_path = None
+                for p in bin_paths:
+                    if os.path.isfile(p):
+                        found_path = p
+                        break
+
+                if found_path == None:
+                    import pdb; pdb.set_trace()
+                    raise RuntimeError('could not find %s to build in %s', (build, cdir))
+                else:
+                    b['path'] = found_path
 
             d = cfg.get('build-dependencies', {})
             d.update(cfg.get('dependencies', {}))
