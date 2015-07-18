@@ -762,10 +762,17 @@ class Crate(object):
                 features = []
                 if type(ftrs) is dict:
                     # add any available features that are activated by the
-                    # dependency entry in the parent's dependency record
+                    # dependency entry in the parent's dependency record,
+                    # and any features they depend on recursively
+                    def add_features(f):
+                        if ftrs.has_key(f):
+                            for k in ftrs[f]:
+                                # guard against infinite recursion
+                                if not k in features:
+                                    features.append(k)
+                                    add_features(k)
                     for k in tftrs:
-                        if ftrs.has_key(k):
-                            features += ftrs[k]
+                        add_features(k)
                 else:
                     features += filter(lambda x: (len(x) > 0) and (x in tftrs), ftrs)
 
