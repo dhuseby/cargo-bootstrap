@@ -859,6 +859,8 @@ class Crate(object):
             cmd.append('%s' % out_dir)
             cmd.append('-L')
             cmd.append('%s' % out_dir)
+            cmd.append('-L')
+            cmd.append('%s/lib' % out_dir)
 
             for e in externs:
                 cmd.append('--extern')
