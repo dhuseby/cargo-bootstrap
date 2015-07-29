@@ -647,11 +647,13 @@ class BuildScriptRunner(Runner):
             if k == 'rustc-link-lib':
                 cmd += ['-l', v]
             elif k == 'rustc-link-search':
+                #dbg("adding link search path: %s" % v)
                 cmd += ['-L', v]
             elif k == 'rustc-cfg':
                 cmd += ['--cfg', v]
                 env['CARGO_FEATURE_%s' % v.upper().replace('-','_')] = 1
             else:
+                #dbg("env[%s] = %s" % (k, v));
                 denv[k] = v
         return (cmd, env, denv)
 
@@ -671,6 +673,7 @@ class Crate(object):
         self._refs = []
         self._env = {}
         self._dep_env = {}
+        self._extra_flags = []
 
     def name(self):
         return self._crate
@@ -794,20 +797,22 @@ class Crate(object):
         output = os.path.join(out_dir, 'lib%s%s.rlib' % (output_name, extra_filename))
 
         if BUILT.has_key(str(self)):
-            return ({'name':self.name(), 'lib':output}, self._env)
+            return ({'name':self.name(), 'lib':output}, self._env, self._extra_flags)
 
         externs = []
+        extra_flags = []
         for dep,info in self._deps.iteritems():
             if CRATES.has_key(dep):
-                extern, env = CRATES[dep].build(self, out_dir, info['features'])
+                extern, env, extra_flags = CRATES[dep].build(self, out_dir, info['features'])
                 externs.append(extern)
                 self._dep_env[CRATES[dep].name()] = env
+                self._extra_flags += extra_flags
 
         if os.path.isfile(output):
             print ''
             dbg('Skipping %s, already built (needed by: %s)' % (str(self), str(by)))
             BUILT[str(self)] = str(by)
-            return ({'name':self.name(), 'lib':output}, self._env)
+            return ({'name':self.name(), 'lib':output}, self._env, self._extra_flags)
 
         # build the environment for subcommands
         env = dict(os.environ)
@@ -869,6 +874,9 @@ class Crate(object):
             cmd.append('-L')
             cmd.append('%s/lib' % out_dir)
 
+            # add in the flags from dependencies
+            cmd += self._extra_flags
+
             for e in externs:
                 cmd.append('--extern')
                 cmd.append('%s=%s' % (e['name'].replace('-','_'), e['lib']))
@@ -918,7 +926,7 @@ class Crate(object):
             #print ''
 
         BUILT[str(self)] = str(by)
-        return ({'name':self.name(), 'lib':output}, self._env)
+        return ({'name':self.name(), 'lib':output}, self._env, bcmd)
 
 @idnt
 def dl_crate(url, depth=0):

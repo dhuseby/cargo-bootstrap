@@ -98,6 +98,6 @@ Make sure you do the following:
 * Use pip to install pytoml and dulwich python modules
 * Install ca_root_nss package
 * Run: ln -s /usr/local/share/certs/ca-root-nss.crt /etc/ssl/cert.pem
-* Install openssl, libssh2, libgit2 packages
+* Install openssl, libssh2, libgit2, and pkgconf packages
 * Install gmake for building cargo once you've bootstrapped a local cargo with
   this script.
