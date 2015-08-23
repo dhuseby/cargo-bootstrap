@@ -104,6 +104,7 @@ import socket
 import requests
 import pytoml as toml
 import dulwich.porcelain as git
+from glob import glob
 
 
 TARGET = None
@@ -128,6 +129,7 @@ BSCRIPT = re.compile(r'^cargo:(?P<key>([^\s=]+))(=(?P<value>.+))?$')
 BNAME = re.compile('^(lib)?(?P<name>([^_]+))(_.*)?$')
 BUILT = {}
 CRATES = {}
+CVER = re.compile("-([^-]+)$")
 UNRESOLVED = []
 PFX = []
 
@@ -771,7 +773,7 @@ class Crate(object):
         return self._resolved
 
     @dbgCtx
-    def resolve(self, tdir, idir, graph=None):
+    def resolve(self, tdir, idir, nodl, graph=None):
         if self._resolved:
             return
         if str(self) in CRATES:
@@ -805,7 +807,10 @@ class Crate(object):
                         svr = dcrate.version().as_range()
                     name, ver, ideps, ftrs, cksum = crate_info_from_index(idir, d['name'], svr)
                     if dcrate is None:
-                        cdir = dl_and_check_crate(tdir, name, ver, cksum)
+                        if nodl:
+                            cdir = find_downloaded_crate(tdir, name, svr)
+                        else:
+                            cdir = dl_and_check_crate(tdir, name, ver, cksum)
                         _, tver, tdeps, build = crate_info_from_toml(cdir)
                         deps += ideps
                         deps += tdeps
@@ -1044,6 +1049,23 @@ def dl_and_check_crate(tdir, name, ver, cksum):
     return cdir
 
 
+def find_downloaded_crate(tdir, name, svr):
+    exists = glob("%s/%s-[0-9]*" % (tdir, name))
+    if not exists:
+        raise RuntimeError("crate does not exist and have --no-download: %s" % name)
+
+    # First, grok the available versions.
+    aver = sorted([Semver(CVER.search(x).group(1)) for x in exists])
+
+    # Now filter the "suitable" versions based on our version range.
+    sver = filter(svr.compare, aver)
+    if not sver:
+        raise RuntimeError("unable to satisfy dependency %s %s from %s; try running without --no-download" % (name, svr, map(str, aver)))
+
+    cver = sver[-1]
+    return "%s/%s-%s" % (tdir, name, cver)
+
+
 def crate_info_from_toml(cdir):
     try:
         with open(os.path.join(cdir, 'Cargo.toml'), 'rb') as ctoml:
@@ -1234,6 +1256,8 @@ def args_parser():
                         help="don't delete the target dir and crate index")
     parser.add_argument('--download', action='store_true',
                         help="only download the crates needed to build cargo")
+    parser.add_argument('--no-download', action='store_true',
+                        help="don't download any crates (fail if any do not exist)")
     parser.add_argument('--graph', action='store_true',
                         help="output a dot graph of the dependencies")
     parser.add_argument('--urls-file', type=str, default=None,
@@ -1316,7 +1340,7 @@ if __name__ == "__main__":
         print '===================================='
         while len(UNRESOLVED) > 0:
             crate = UNRESOLVED.pop(0)
-            crate.resolve(args.target_dir, args.crate_index, GRAPH)
+            crate.resolve(args.target_dir, args.crate_index, args.no_download, GRAPH)
 
         if args.graph:
             print >> GRAPH, "}"
