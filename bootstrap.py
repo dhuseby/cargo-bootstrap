@@ -1208,11 +1208,11 @@ if __name__ == "__main__":
 
             if index is None:
                 raise RuntimeError('You must have a local clone of the crates index, ' \
-                               'omit --no-clone to allow this script to clone it for ' \
-                               'you, or pass --no-git to bypass this check.')
+                                   'omit --no-clone to allow this script to clone it for ' \
+                                   'you, or pass --no-git to bypass this check.')
             if cargo is None:
-                raise RuntimeError('You must have a local clone of the cargo repo '\
-                               'so that this script can read the cargo toml file.')
+                raise RuntimeError('You must have a local clone of the cargo repo ' \
+                                   'so that this script can read the cargo toml file.')
 
         if TARGET is None:
             raise RuntimeError('You must specify the target triple of this machine')
