@@ -953,33 +953,28 @@ def dl_crate(url, depth=0):
 @idnt
 def dl_and_check_crate(tdir, name, ver, cksum):
     global CRATES
-    try:
-        cname = '%s-%s' % (name, ver)
-        cdir = os.path.join(tdir, cname)
-        if CRATES.has_key(cname):
-            dbg('skipping %s...already downloaded' % cname)
-            return cdir
+    cname = '%s-%s' % (name, ver)
+    cdir = os.path.join(tdir, cname)
+    if CRATES.has_key(cname):
+        dbg('skipping %s...already downloaded' % cname)
+        return cdir
 
-        if not os.path.isdir(cdir):
-            dbg('Downloading %s source to %s' % (cname, cdir))
-            dl = CRATE_API_DL % (name, ver)
-            buf = dl_crate(dl)
-            if (cksum is not None):
-                h = hashlib.sha256()
-                h.update(buf)
-                if h.hexdigest() == cksum:
-                    dbg('Checksum is good...%s' % cksum)
-                else:
-                    dbg('Checksum is BAD (%s != %s)' % (h.hexdigest(), cksum))
+    if not os.path.isdir(cdir):
+        dbg('Downloading %s source to %s' % (cname, cdir))
+        dl = CRATE_API_DL % (name, ver)
+        buf = dl_crate(dl)
+        if (cksum is not None):
+            h = hashlib.sha256()
+            h.update(buf)
+            if h.hexdigest() == cksum:
+                dbg('Checksum is good...%s' % cksum)
+            else:
+                dbg('Checksum is BAD (%s != %s)' % (h.hexdigest(), cksum))
 
-            fbuf = cStringIO.StringIO(buf)
-            with tarfile.open(fileobj=fbuf) as tf:
-                dbg('unpacking result to %s...' % cdir)
-                tf.extractall(path=tdir)
-
-    except Exception, e:
-        self._dir = None
-        raise e
+        fbuf = cStringIO.StringIO(buf)
+        with tarfile.open(fileobj=fbuf) as tf:
+            dbg('unpacking result to %s...' % cdir)
+            tf.extractall(path=tdir)
 
     return cdir
 
