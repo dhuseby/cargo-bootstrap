@@ -1159,6 +1159,8 @@ def args_parser():
                         help="run semver parsing tests")
     parser.add_argument('--no-clone', action='store_true',
                         help="skip cloning crates index, --target-dir must point to an existing clone of the crates index")
+    parser.add_argument('--no-git', action='store_true',
+                        help="don't assume that the crates index and cargo root are git repos; implies --no-clone")
     parser.add_argument('--no-clean', action='store_true',
                         help="don't delete the target dir and crate index")
     parser.add_argument('--download', action='store_true',
@@ -1199,16 +1201,18 @@ if __name__ == "__main__":
 
         TARGET = args.target
         HOST = args.host
-        index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
-        cargo = open_or_clone_repo(args.cargo_root, CARGO_REPO, args.no_clone)
 
-        if index is None:
-            raise RuntimeError('You must have a local clone of the crates index ' \
-                               'or omit --no-clone to allow this script to clone ' \
-                               'it for you.')
-        if cargo is None:
-            raise RuntimeError('You must have a local clone of the cargo repo '\
-                               'so that this script can read the cargo toml file.')
+        if not args.no_git:
+            index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
+            cargo = open_or_clone_repo(args.cargo_root, CARGO_REPO, args.no_clone)
+
+            if index is None:
+                raise RuntimeError('You must have a local clone of the crates index, ' \
+                                   'omit --no-clone to allow this script to clone it for ' \
+                                   'you, or pass --no-git to bypass this check.')
+            if cargo is None:
+                raise RuntimeError('You must have a local clone of the cargo repo ' \
+                                   'so that this script can read the cargo toml file.')
 
         if TARGET is None:
             raise RuntimeError('You must specify the target triple of this machine')
