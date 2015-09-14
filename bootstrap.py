@@ -55,6 +55,7 @@ Command Line Options
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
+--verbose              causes extra output to be printed during bootstrapping.
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -273,6 +274,9 @@ class Semver(dict):
 
     def __hash__(self):
         return hash(str(self))
+
+    def as_range(self):
+        return SemverRange('=%s' % self)
 
     def parts(self):
         major, minor, patch, prerelease, build = self.parts_raw()
@@ -601,7 +605,7 @@ class Runner(object):
     def __call__(self, c, e):
         cmd = self._cmd + c
         env = dict(self._env, **e)
-        #dbg(' env: %s' % e)
+        dbg(' env: %s' % e)
         dbg(' '.join(cmd))
 
         proc = subprocess.Popen(cmd, env=env, \
@@ -630,6 +634,9 @@ class RustcRunner(Runner):
 class BuildScriptRunner(Runner):
 
     def __call__(self, c, e):
+        #dbg('XXX Running build script:');
+        #dbg(' env: %s' % e)
+        #dbg(' '.join(self._cmd + c))
         super(BuildScriptRunner, self).__call__(c, e)
 
         # parse the output for cargo: lines
@@ -677,6 +684,9 @@ class Crate(object):
 
     def name(self):
         return self._crate
+
+    def dep_info(self):
+        return self._dep_info
 
     def version(self):
         return self._version
@@ -730,20 +740,33 @@ class Crate(object):
 
                 svr = SemverRange(d['req'])
                 print ''
+                deps = []
                 dbg('Looking up info for %s %s' % (d['name'], str(svr)))
                 if d.get('local', None) is None:
-                    name, ver, deps, ftrs, cksum = crate_info_from_index(idir, d['name'], svr)
-                    cdir = dl_and_check_crate(tdir, name, ver, cksum)
-                    _, tver, tdeps, build = crate_info_from_toml(cdir)
-                    deps += tdeps
+                    # go through crates first to see if the is satisfied already
+                    dcrate = find_crate_by_name_and_semver(d['name'], svr)
+                    if dcrate is not None:
+                        #import pdb; pdb.set_trace()
+                        svr = dcrate.version().as_range()
+                    name, ver, ideps, ftrs, cksum = crate_info_from_index(idir, d['name'], svr)
+                    if dcrate is None:
+                        cdir = dl_and_check_crate(tdir, name, ver, cksum)
+                        _, tver, tdeps, build = crate_info_from_toml(cdir)
+                        deps += ideps
+                        deps += tdeps
+                    else:
+                        dbg('Found crate already satisfying %s %s' % (d['name'], str(svr)))
+                        deps += dcrate.dep_info()
                 else:
                     cdir = d['path']
-                    name, ver, deps, build = crate_info_from_toml(cdir)
+                    name, ver, ideps, build = crate_info_from_toml(cdir)
+                    deps += ideps
 
                 try:
-                    dcrate = Crate(name, ver, deps, cdir, build)
-                    if CRATES.has_key(str(dcrate)):
-                        dcrate = CRATES[str(dcrate)]
+                    if dcrate is None:
+                        dcrate = Crate(name, ver, deps, cdir, build)
+                        if CRATES.has_key(str(dcrate)):
+                            dcrate = CRATES[str(dcrate)]
                     UNRESOLVED.append(dcrate)
                     if graph is not None:
                         print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
@@ -869,10 +892,14 @@ class Crate(object):
 
             cmd.append('--out-dir')
             cmd.append('%s' % out_dir)
+            cmd.append('--emit=dep-info,link')
+            cmd.append('--target')
+            cmd.append(TARGET)
             cmd.append('-L')
             cmd.append('%s' % out_dir)
             cmd.append('-L')
             cmd.append('%s/lib' % out_dir)
+
 
             # add in the flags from dependencies
             cmd += self._extra_flags
@@ -1137,6 +1164,17 @@ def crate_info_from_index(idir, name, svr):
     deps = filter(lambda x: x.get('target', TARGET) == TARGET, deps)
 
     return (name, ver, deps, ftrs, cksum)
+
+def find_crate_by_name_and_semver(name, svr):
+    global CRATES
+    global UNRESOLVED
+    for c in CRATES.itervalues():
+        if c.name() == name and svr.compare(c.version()):
+            return c
+    for c in UNRESOLVED:
+        if c.name() == name and svr.compare(c.version()):
+            return c
+    return None
 
 def args_parser():
     parser = argparse.ArgumentParser(description='Cargo Bootstrap Tool')
