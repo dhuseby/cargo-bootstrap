@@ -598,29 +598,58 @@ class Runner(object):
         if type(self._cmd) is not list:
             self._cmd = [self._cmd]
         self._env = e
-        self._output = []
+        self._stdout = []
+        self._stderr = []
         self._returncode = 0
         self._cwd = cwd
 
     def __call__(self, c, e):
         cmd = self._cmd + c
         env = dict(self._env, **e)
-        dbg(' env: %s' % e)
-        dbg(' '.join(cmd))
+        #dbg(' env: %s' % env)
+        #dbg(' cwd: %s' % self._cwd)
+        envstr = ''
+        for k,v in env.iteritems():
+            envstr += ' %s="%s"' % (k, v)
+        if self._cwd is not None:
+            dbg('cd %s && %s %s' % (self._cwd, envstr, ' '.join(cmd)))
+        else:
+            dbg('%s %s' % (envstr, ' '.join(cmd)))
 
         proc = subprocess.Popen(cmd, env=env, \
-                                stdout=subprocess.PIPE, cwd=self._cwd)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                cwd=self._cwd)
+        out, err = proc.communicate()
+
+        for lo in out.split('\n'):
+            if len(lo) > 0:
+                self._stdout.append(lo)
+                #dbg('out: %s' % lo)
+
+        for le in err.split('\n'):
+            if len(le) > 0:
+                self._stderr.append(le)
+                dbg(le)
+
+        """
         while proc.poll() is None:
-            l = proc.stdout.readline().rstrip('\n')
-            if len(l) > 0:
-                self._output.append(l)
-                dbg(l)
+            lo = proc.stdout.readline().rstrip('\n')
+            le = proc.stderr.readline().rstrip('\n')
+            if len(lo) > 0:
+                self._stdout.append(lo)
+                dbg(lo)
                 sys.stdout.flush()
+            if len(le) > 0:
+                self._stderr.append(le)
+                dbg('err: %s', le)
+                sys.stdout.flush()
+        """
         self._returncode = proc.wait()
-        return self._output
+        #dbg(' ret: %s' % self._returncode)
+        return self._stdout
 
     def output(self):
-        return self._output
+        return self._stdout
 
     def returncode(self):
         return self._returncode
@@ -652,6 +681,7 @@ class BuildScriptRunner(Runner):
             v = pieces['value']
 
             if k == 'rustc-link-lib':
+                #dbg('YYYYYY: adding -l %s' % v)
                 cmd += ['-l', v]
             elif k == 'rustc-link-search':
                 #dbg("adding link search path: %s" % v)
@@ -838,7 +868,9 @@ class Crate(object):
             return ({'name':self.name(), 'lib':output}, self._env, self._extra_flags)
 
         # build the environment for subcommands
-        env = dict(os.environ)
+        tenv = dict(os.environ)
+        env = {}
+        env['PATH'] = tenv['PATH']
         env['OUT_DIR'] = out_dir
         env['TARGET'] = TARGET
         env['HOST'] = HOST
@@ -908,12 +940,6 @@ class Crate(object):
                 cmd.append('--extern')
                 cmd.append('%s=%s' % (e['name'].replace('-','_'), e['lib']))
 
-            # add in the native libraries to link to
-            if b['type'] != 'build_script':
-                for l in b.get('links', []):
-                    cmd.append('-l')
-                    cmd.append(l)
-
             # get the pkg key name
             match = BNAME.match(b['name'])
             if match is not None:
@@ -947,9 +973,9 @@ class Crate(object):
             for k,v in e2.iteritems():
                 self._env['DEP_%s_%s' % (key.upper(), k.upper())] = v
 
-            #dbg(' cmd: %s' % bcmd)
-            #dbg(' env: %s' % benv)
-            #dbg('denv: %s' % self._env)
+            #dbg('XXX  cmd: %s' % bcmd)
+            #dbg('XXX  env: %s' % benv)
+            #dbg('XXX denv: %s' % self._env)
             #print ''
 
         BUILT[str(self)] = str(by)
