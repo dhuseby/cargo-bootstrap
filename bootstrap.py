@@ -1133,11 +1133,13 @@ def crate_info_from_toml(cdir):
                     if v.get('version', None) is None:
                         deps.append({'name':k, 'path':os.path.join(cdir, v['path']), 'local':True, 'req':0})
                     else:
+                        opts = v.get('optional',False)
                         ftrs = v.get('features',[])
-                        deps.append({'name':k, 'path': v['path'], 'req':v['version'], 'features':ftrs})
+                        deps.append({'name':k, 'path': v['path'], 'req':v['version'], 'features':ftrs, 'optional':opts})
                 else:
+                    opts = v.get('optional',False)
                     ftrs = v.get('features',[])
-                    deps.append({'name':k, 'req':v['version'], 'features':ftrs})
+                    deps.append({'name':k, 'req':v['version'], 'features':ftrs, 'optional':opts})
 
             return (name, ver, deps, build)
 
