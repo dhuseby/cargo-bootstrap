@@ -55,7 +55,6 @@ Command Line Options
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
---verbose              causes extra output to be printed during bootstrapping.
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
