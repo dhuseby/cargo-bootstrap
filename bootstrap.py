@@ -55,7 +55,6 @@ Command Line Options
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
---verbose              causes extra output to be printed during bootstrapping.
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -111,13 +110,13 @@ GRAPH = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
-SV_RANGE = re.compile('^(?P<op>(?:\<|\>|=|\<=|\>=|\^|\~))?'
+SV_RANGE = re.compile('^(?P<op>(?:\<=|\>=|=|\<|\>|\^|\~))?\s*'
                       '(?P<major>(?:\*|0|[1-9][0-9]*))'
                       '(\.(?P<minor>(?:\*|0|[1-9][0-9]*)))?'
                       '(\.(?P<patch>(?:\*|0|[1-9][0-9]*)))?'
                       '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
                       '(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
-SEMVER = re.compile('^(?P<major>(?:0|[1-9][0-9]*))'
+SEMVER = re.compile('^\s*(?P<major>(?:0|[1-9][0-9]*))'
                     '(\.(?P<minor>(?:0|[1-9][0-9]*)))?'
                     '(\.(?P<patch>(?:0|[1-9][0-9]*)))?'
                     '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
@@ -1134,11 +1133,13 @@ def crate_info_from_toml(cdir):
                     if v.get('version', None) is None:
                         deps.append({'name':k, 'path':os.path.join(cdir, v['path']), 'local':True, 'req':0})
                     else:
+                        opts = v.get('optional',False)
                         ftrs = v.get('features',[])
-                        deps.append({'name':k, 'path': v['path'], 'req':v['version'], 'features':ftrs})
+                        deps.append({'name':k, 'path': v['path'], 'req':v['version'], 'features':ftrs, 'optional':opts})
                 else:
+                    opts = v.get('optional',False)
                     ftrs = v.get('features',[])
-                    deps.append({'name':k, 'req':v['version'], 'features':ftrs})
+                    deps.append({'name':k, 'req':v['version'], 'features':ftrs, 'optional':opts})
 
             return (name, ver, deps, build)
 
