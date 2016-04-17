@@ -902,6 +902,7 @@ class Crate(object):
             cmd.append(os.path.join(self._dir, b['path']))
             cmd.append('--crate-name')
             if b['type'] == 'lib':
+                b.setdefault('name', self.name())
                 cmd.append(b['name'].replace('-','_'))
                 cmd.append('--crate-type')
                 cmd.append('lib')
