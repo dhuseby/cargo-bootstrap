@@ -729,7 +729,7 @@ class Crate(object):
         return '%s-%s' % (self.name(), self.version())
 
     def add_dep(self, crate, features):
-        if self._deps.has_key(str(crate)):
+        if str(crate) in self._deps:
             return
 
         features = [str(x) for x in features]
@@ -750,7 +750,7 @@ class Crate(object):
 
         if self._resolved:
             return
-        if CRATES.has_key(str(self)):
+        if str(self) in CRATES:
             return
 
         if self._dep_info is not None:
@@ -796,7 +796,7 @@ class Crate(object):
                 try:
                     if dcrate is None:
                         dcrate = Crate(name, ver, deps, cdir, build)
-                        if CRATES.has_key(str(dcrate)):
+                        if str(dcrate) in CRATES:
                             dcrate = CRATES[str(dcrate)]
                     UNRESOLVED.append(dcrate)
                     if graph is not None:
@@ -822,7 +822,7 @@ class Crate(object):
                     # dependency entry in the parent's dependency record,
                     # and any features they depend on recursively
                     def add_features(f):
-                        if ftrs.has_key(f):
+                        if f in ftrs:
                             for k in ftrs[f]:
                                 # guard against infinite recursion
                                 if not k in features:
@@ -850,13 +850,13 @@ class Crate(object):
         output_name = self.name().replace('-','_')
         output = os.path.join(out_dir, 'lib%s%s.rlib' % (output_name, extra_filename))
 
-        if BUILT.has_key(str(self)):
+        if str(self) in BUILT:
             return ({'name':self.name(), 'lib':output}, self._env, self._extra_flags)
 
         externs = []
         extra_flags = []
         for dep,info in self._deps.iteritems():
-            if CRATES.has_key(dep):
+            if dep in CRATES:
                 extern, env, extra_flags = CRATES[dep].build(self, out_dir, info['features'])
                 externs.append(extern)
                 self._dep_env[CRATES[dep].name()] = env
@@ -999,7 +999,7 @@ def dl_crate(url, depth=0):
     res = conn.getresponse()
     dbg('%sconnected to %s...%s' % ((' ' * depth), url, res.status))
     headers = dict(res.getheaders())
-    if headers.has_key('location') and headers['location'] != url:
+    if 'location' in headers and headers['location'] != url:
         return dl_crate(headers['location'], depth + 1)
 
     if URLS_FILE is not None:
@@ -1012,7 +1012,7 @@ def dl_and_check_crate(tdir, name, ver, cksum):
     global CRATES
     cname = '%s-%s' % (name, ver)
     cdir = os.path.join(tdir, cname)
-    if CRATES.has_key(cname):
+    if cname in CRATES:
         dbg('skipping %s...already downloaded' % cname)
         return cdir
 
@@ -1134,7 +1134,7 @@ def crate_info_from_toml(cdir):
             for k,v in d.iteritems():
                 if type(v) is not dict:
                     deps.append({'name':k, 'req': v})
-                elif v.has_key('path'):
+                elif 'path' in v:
                     if v.get('version', None) is None:
                         deps.append({'name':k, 'path':os.path.join(cdir, v['path']), 'local':True, 'req':0})
                     else:
@@ -1176,7 +1176,7 @@ def crate_info_from_index(idir, name, svr):
 
     passed = {}
     for info in dep_infos:
-        if not info.has_key('vers'):
+        if 'vers' not in info:
             continue
         sv = Semver(info['vers'])
         if svr.compare(sv):
