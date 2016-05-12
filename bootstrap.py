@@ -88,22 +88,23 @@ After the script completed, there is a Cargo executable named `cargo-0_2_0` in
 specifying it as the `--local-cargo` option to Cargo's `./configure` script.
 """
 
-import argparse, \
-       cStringIO, \
-       hashlib, \
-       httplib, \
-       inspect, \
-       json, \
-       os, \
-       re, \
-       shutil, \
-       subprocess, \
-       sys, \
-       tarfile, \
-       tempfile, \
-       urlparse
+import argparse
+import cStringIO
+import hashlib
+import httplib
+import inspect
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urlparse
 import pytoml as toml
 import dulwich.porcelain as git
+
 
 TARGET = None
 HOST = None
@@ -112,18 +113,18 @@ URLS_FILE = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
-SV_RANGE = re.compile('^(?P<op>(?:\<=|\>=|=|\<|\>|\^|\~))?\s*'
-                      '(?P<major>(?:\*|0|[1-9][0-9]*))'
-                      '(\.(?P<minor>(?:\*|0|[1-9][0-9]*)))?'
-                      '(\.(?P<patch>(?:\*|0|[1-9][0-9]*)))?'
-                      '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
-                      '(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
-SEMVER = re.compile('^\s*(?P<major>(?:0|[1-9][0-9]*))'
-                    '(\.(?P<minor>(?:0|[1-9][0-9]*)))?'
-                    '(\.(?P<patch>(?:0|[1-9][0-9]*)))?'
-                    '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
-                    '(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
-BSCRIPT = re.compile('^cargo:(?P<key>([^\s=]+))(=(?P<value>.+))?$')
+SV_RANGE = re.compile(r'^(?P<op>(?:\<=|\>=|=|\<|\>|\^|\~))?\s*'
+                      r'(?P<major>(?:\*|0|[1-9][0-9]*))'
+                      r'(\.(?P<minor>(?:\*|0|[1-9][0-9]*)))?'
+                      r'(\.(?P<patch>(?:\*|0|[1-9][0-9]*)))?'
+                      r'(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
+                      r'(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
+SEMVER = re.compile(r'^\s*(?P<major>(?:0|[1-9][0-9]*))'
+                    r'(\.(?P<minor>(?:0|[1-9][0-9]*)))?'
+                    r'(\.(?P<patch>(?:0|[1-9][0-9]*)))?'
+                    r'(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
+                    r'(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
+BSCRIPT = re.compile(r'^cargo:(?P<key>([^\s=]+))(=(?P<value>.+))?$')
 BNAME = re.compile('^(lib)?(?P<name>([^_]+))(_.*)?$')
 BUILT = {}
 CRATES = {}
@@ -138,7 +139,6 @@ def idnt(f):
 
 def dbgCtx(f):
     def do_dbg(self, *cargs):
-        global PFX
         PFX.append(self.name())
         ret = f(self, *cargs)
         PFX.pop()
@@ -146,8 +146,8 @@ def dbgCtx(f):
     return do_dbg
 
 def dbg(s):
-    global PFX
     print '%s: %s' % (':'.join(PFX), s)
+
 
 class PreRelease(object):
 
@@ -596,7 +596,7 @@ class Runner(object):
 
     def __init__(self, c, e, cwd=None):
         self._cmd = c
-        if type(self._cmd) is not list:
+        if not isinstance(self._cmd, list):
             self._cmd = [self._cmd]
         self._env = e
         self._stdout = []
@@ -610,15 +610,15 @@ class Runner(object):
         #dbg(' env: %s' % env)
         #dbg(' cwd: %s' % self._cwd)
         envstr = ''
-        for k,v in env.iteritems():
+        for k, v in env.iteritems():
             envstr += ' %s="%s"' % (k, v)
         if self._cwd is not None:
             dbg('cd %s && %s %s' % (self._cwd, envstr, ' '.join(cmd)))
         else:
             dbg('%s %s' % (envstr, ' '.join(cmd)))
 
-        proc = subprocess.Popen(cmd, env=env, \
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+        proc = subprocess.Popen(cmd, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 cwd=self._cwd)
         out, err = proc.communicate()
 
@@ -689,7 +689,7 @@ class BuildScriptRunner(Runner):
                 cmd += ['-L', v]
             elif k == 'rustc-cfg':
                 cmd += ['--cfg', v]
-                env['CARGO_FEATURE_%s' % v.upper().replace('-','_')] = 1
+                env['CARGO_FEATURE_%s' % v.upper().replace('-', '_')] = 1
             else:
                 #dbg("env[%s] = %s" % (k, v));
                 denv[k] = v
@@ -703,9 +703,9 @@ class Crate(object):
         self._dep_info = deps
         self._dir = cdir
         # put the build scripts first
-        self._build = filter(lambda x: x.get('type', None) == 'build_script', build)
+        self._build = [x for x in build if x.get('type') == 'build_script']
         # then add the lib/bin builds
-        self._build += filter(lambda x: x.get('type', None) != 'build_script', build)
+        self._build += [x for x in build if x.get('type') != 'build_script']
         self._resolved = False
         self._deps = {}
         self._refs = []
@@ -745,9 +745,6 @@ class Crate(object):
 
     @dbgCtx
     def resolve(self, tdir, idir, graph=None):
-        global CRATES
-        global UNRESOLVED
-
         if self._resolved:
             return
         if str(self) in CRATES:
@@ -807,17 +804,17 @@ class Crate(object):
 
                 # clean up the list of features that are enabled
                 tftrs = d.get('features', [])
-                if type(tftrs) is dict:
+                if isinstance(tftrs, dict):
                     tftrs = tftrs.keys()
                 else:
-                    tftrs = filter(lambda x: len(x) > 0, tftrs)
+                    tftrs = [x for x in tftrs if len(x) > 0]
 
                 # add 'default' if default_features is true
                 if d.get('default_features', True):
                     tftrs.append('default')
 
                 features = []
-                if type(ftrs) is dict:
+                if isinstance(ftrs, dict):
                     # add any available features that are activated by the
                     # dependency entry in the parent's dependency record,
                     # and any features they depend on recursively
@@ -831,7 +828,7 @@ class Crate(object):
                     for k in tftrs:
                         add_features(k)
                 else:
-                    features += filter(lambda x: (len(x) > 0) and (x in tftrs), ftrs)
+                    features += [x for x in ftrs if (len(x) > 0) and (x in tftrs)]
 
                 if dcrate is not None:
                     self.add_dep(dcrate, features)
@@ -841,11 +838,6 @@ class Crate(object):
 
     @dbgCtx
     def build(self, by, out_dir, features=[]):
-        global BUILT
-        global CRATES
-        global TARGET
-        global HOST
-
         extra_filename = '-' + str(self.version()).replace('.','_')
         output_name = self.name().replace('-','_')
         output = os.path.join(out_dir, 'lib%s%s.rlib' % (output_name, extra_filename))
@@ -1009,7 +1001,6 @@ def dl_crate(url, depth=0):
 
 @idnt
 def dl_and_check_crate(tdir, name, ver, cksum):
-    global CRATES
     cname = '%s-%s' % (name, ver)
     cdir = os.path.join(tdir, cname)
     if cname in CRATES:
@@ -1156,8 +1147,6 @@ def crate_info_from_toml(cdir):
 
 @idnt
 def crate_info_from_index(idir, name, svr):
-    global TARGET
-
     if len(name) == 1:
         ipath = os.path.join(idir, '1', name)
     elif len(name) == 2:
@@ -1193,13 +1182,11 @@ def crate_info_from_index(idir, name, svr):
     cksum = best_info.get('cksum', None)
 
     # only include deps without a 'target' or ones with matching 'target'
-    deps = filter(lambda x: x.get('target', TARGET) == TARGET, deps)
+    deps = [x for x in deps if x.get('target', TARGET) == TARGET]
 
     return (name, ver, deps, ftrs, cksum)
 
 def find_crate_by_name_and_semver(name, svr):
-    global CRATES
-    global UNRESOLVED
     for c in CRATES.itervalues():
         if c.name() == name and svr.compare(c.version()):
             return c
