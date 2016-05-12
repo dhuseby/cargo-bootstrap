@@ -55,6 +55,7 @@ Command Line Options
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --test-semver          triggers the execution of the Semver and SemverRange class tests.
+--urls-file <file>     file to write crate URLs to
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -107,6 +108,7 @@ import dulwich.porcelain as git
 TARGET = None
 HOST = None
 GRAPH = None
+URLS_FILE = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
@@ -1000,6 +1002,9 @@ def dl_crate(url, depth=0):
     if headers.has_key('location') and headers['location'] != url:
         return dl_crate(headers['location'], depth + 1)
 
+    if URLS_FILE is not None:
+        with open(URLS_FILE, "a") as f:
+            f.write(url + "\n")
     return res.read()
 
 @idnt
@@ -1227,6 +1232,8 @@ def args_parser():
                         help="only download the crates needed to build cargo")
     parser.add_argument('--graph', action='store_true',
                         help="output a dot graph of the dependencies")
+    parser.add_argument('--urls-file', type=str, default=None,
+                        help="file to write crate URLs to")
     return parser
 
 @idnt
@@ -1261,6 +1268,7 @@ if __name__ == "__main__":
 
         TARGET = args.target
         HOST = args.host
+        URLS_FILE = args.urls_file
 
         if not args.no_git:
             index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
