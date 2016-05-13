@@ -3,21 +3,7 @@
 About
 =====
 
-This is a fork / branch of patches in-progress for the upstream
-version of cargo-bootstrap, hosted
-[here](https://github.com/dhuseby/cargo-bootstrap).
-
-Some of the changes are:
-
-* Use py.test and Travis CI to run tests
-
-* Fixes a bug in the semantic version check where it previously thought 2.0.0 < 0.5.0
-
-* Adds limited support for ranges as multiple specs, like so: >= 0.5, < 2.0
-
-OK, here's the original About message...
-
-This python script is design to do the bare minimum to compile and link the
+This python script is designed to do the bare minimum to compile and link the
 Cargo binary for the purposes of bootstrapping itself on a new platform for
 which cross-compiling isn't possible.  I wrote this specifically to bootstrap
 Cargo on [Bitrig](https://bitrig.org).  Bitrig is a fork of OpenBSD that uses
