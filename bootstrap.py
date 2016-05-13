@@ -515,10 +515,13 @@ class SemverRange(object):
 
         op = self._op
         if op == '*':
-            if self._semver['major'] == '*':
+            if self._semver is not None and self._semver['major'] == '*':
                 return sv >= Semver('0.0.0')
-
-            return (sv >= self._lower) and (sv < self._upper)
+            if self._lower is not None and sv < self._lower:
+                return False
+            if self._upper is not None and sv >= self._upper:
+                return False
+            return True
         elif op == '^':
             return (sv >= self._lower) and (sv < self._upper)
         elif op == '~':
@@ -613,6 +616,7 @@ def test_semver_range():
 
 def test_semver_multirange():
     assert SemverRange(">= 0.5, < 2.0").compare("1.0.0")
+    assert SemverRange("*").compare("0.2.7")
 
 
 class Runner(object):
