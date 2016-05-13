@@ -528,63 +528,68 @@ class SemverRange(dict):
         raise RuntimeError('Semver comparison failed to find a matching op')
 
 def test_semver():
-    print '\ntesting parsing:'
-    print '"1"                    is: "%s"' % Semver("1")
-    print '"1.1"                  is: "%s"' % Semver("1.1")
-    print '"1.1.1"                is: "%s"' % Semver("1.1.1")
-    print '"1.1.1-alpha"          is: "%s"' % Semver("1.1.1-alpha")
-    print '"1.1.1-alpha.1"        is: "%s"' % Semver("1.1.1-alpha.1")
-    print '"1.1.1-alpha+beta"     is: "%s"' % Semver("1.1.1-alpha+beta")
-    print '"1.1.1-alpha.1+beta"   is: "%s"' % Semver("1.1.1-alpha.1+beta")
-    print '"1.1.1-alpha.1+beta.1" is: "%s"' % Semver("1.1.1-alpha.1+beta.1")
+    """
+    Tests for Semver parsing. Run using py.test: py.test bootstrap.py
+    """
+    assert str(Semver("1")) == "1.0.0"
+    assert str(Semver("1.1")) == "1.1.0"
+    assert str(Semver("1.1.1")) == "1.1.1"
+    assert str(Semver("1.1.1-alpha")) == "1.1.1-alpha"
+    assert str(Semver("1.1.1-alpha.1")) == "1.1.1-alpha.1"
+    assert str(Semver("1.1.1-alpha+beta")) == "1.1.1-alpha+beta"
+    assert str(Semver("1.1.1-alpha+beta.1")) == "1.1.1-alpha+beta.1"
 
-    print '\ntesting equality:'
-    print '"1"                    == "1.0.0"                is: %s' % (Semver("1") == Semver("1.0.0"))
-    print '"1.1"                  == "1.1.0"                is: %s' % (Semver("1.1") == Semver("1.1.0"))
-    print '"1.1.1"                == "1.1.1"                is: %s' % (Semver("1.1.1") == Semver("1.1.1"))
-    print '"1.1.1-alpha"          == "1.1.1-alpha"          is: %s' % (Semver("1.1.1-alpha") == Semver("1.1.1-alpha"))
-    print '"1.1.1-alpha.1"        == "1.1.1-alpha.1"        is: %s' % (Semver("1.1.1-alpha.1") == Semver("1.1.1-alpha.1"))
-    print '"1.1.1-alpha+beta"     == "1.1.1-alpha+beta"     is: %s' % (Semver("1.1.1-alpha+beta") == Semver("1.1.1-alpha+beta"))
-    print '"1.1.1-alpha.1+beta"   == "1.1.1-alpha.1+beta"   is: %s' % (Semver("1.1.1-alpha.1+beta") == Semver("1.1.1-alpha.1+beta"))
-    print '"1.1.1-alpha.1+beta.1" == "1.1.1-alpha.1+beta.1" is: %s' % (Semver("1.1.1-alpha.1+beta.1") == Semver("1.1.1-alpha.1+beta.1"))
+def test_semver_eq():
+    assert Semver("1") == Semver("1.0.0")
+    assert Semver("1.1") == Semver("1.1.0")
+    assert Semver("1.1.1") == Semver("1.1.1")
+    assert Semver("1.1.1-alpha") == Semver("1.1.1-alpha")
+    assert Semver("1.1.1-alpha.1") == Semver("1.1.1-alpha.1")
+    assert Semver("1.1.1-alpha+beta") == Semver("1.1.1-alpha+beta")
+    assert Semver("1.1.1-alpha.1+beta") == Semver("1.1.1-alpha.1+beta")
+    assert Semver("1.1.1-alpha.1+beta.1") == Semver("1.1.1-alpha.1+beta.1")
 
-    print '\ntesting less than:'
-    print '"1"                  < "2.0.0"              is: %s' % (Semver("1") < Semver("2.0.0"))
-    print '"1.1"                < "1.2.0"              is: %s' % (Semver("1.1") < Semver("1.2.0"))
-    print '"1.1.1"              < "1.1.2"              is: %s' % (Semver("1.1.1") < Semver("1.1.2"))
-    print '"1.1.1-alpha"        < "1.1.1"              is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1"))
-    print '"1.1.1-alpha"        < "1.1.1-beta"         is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-beta"))
-    print '"1.1.1-1"            < "1.1.1-alpha"        is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-beta"))
-    print '"1.1.1-alpha"        < "1.1.1-alpha.1"      is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-alpha.1"))
-    print '"1.1.1-alpha.1"      < "1.1.1-alpha.2"      is: %s' % (Semver("1.1.1-alpha.1") < Semver("1.1.1-alpha.2"))
-    print '"1.1.1-alpha+beta"   < "1.1.1+beta"         is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1+beta"))
-    print '"1.1.1-alpha+beta"   < "1.1.1-beta+beta"    is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta"))
-    print '"1.1.1-1+beta"       < "1.1.1-alpha+beta"   is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta"))
-    print '"1.1.1-alpha+beta"   < "1.1.1-alpha.1+beta" is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-alpha.1+beta"))
-    print '"1.1.1-alpha.1+beta" < "1.1.1-alpha.2+beta" is: %s' % (Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta"))
+def test_semver_lt():
+    assert Semver("1") < Semver("2.0.0")
+    assert Semver("1.1") < Semver("1.2.0")
+    assert Semver("1.1.1") < Semver("1.1.2")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-beta")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-beta")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-alpha.1")
+    assert Semver("1.1.1-alpha.1") < Semver("1.1.1-alpha.2")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-alpha.1+beta")
+    assert Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta")
 
-    print '\ntesting semver range parsing:'
-    print '"0"      lower: %s, upper: %s' % (SemverRange('0').lower(), SemverRange('0').upper())
-    print '"0.0"    lower: %s, upper: %s' % (SemverRange('0.0').lower(), SemverRange('0.0').upper())
-    print '"0.0.0"  lower: %s, upper: %s' % (SemverRange('0.0.0').lower(), SemverRange('0.0.0').upper())
-    print '"0.0.1"  lower: %s, upper: %s' % (SemverRange('0.0.1').lower(), SemverRange('0.0.1').upper())
-    print '"0.1.1"  lower: %s, upper: %s' % (SemverRange('0.1.1').lower(), SemverRange('0.1.1').upper())
-    print '"1.1.1"  lower: %s, upper: %s' % (SemverRange('1.1.1').lower(), SemverRange('1.1.1').upper())
-    print '"^0"     lower: %s, upper: %s' % (SemverRange('^0').lower(), SemverRange('^0').upper())
-    print '"^0.0"   lower: %s, upper: %s' % (SemverRange('^0.0').lower(), SemverRange('^0.0').upper())
-    print '"^0.0.0" lower: %s, upper: %s' % (SemverRange('^0.0.0').lower(), SemverRange('^0.0.0').upper())
-    print '"^0.0.1" lower: %s, upper: %s' % (SemverRange('^0.0.1').lower(), SemverRange('^0.0.1').upper())
-    print '"^0.1.1" lower: %s, upper: %s' % (SemverRange('^0.1.1').lower(), SemverRange('^0.1.1').upper())
-    print '"^1.1.1" lower: %s, upper: %s' % (SemverRange('^1.1.1').lower(), SemverRange('^1.1.1').upper())
-    print '"~0"     lower: %s, upper: %s' % (SemverRange('~0').lower(), SemverRange('~0').upper())
-    print '"~0.0"   lower: %s, upper: %s' % (SemverRange('~0.0').lower(), SemverRange('~0.0').upper())
-    print '"~0.0.0" lower: %s, upper: %s' % (SemverRange('~0.0.0').lower(), SemverRange('~0.0.0').upper())
-    print '"~0.0.1" lower: %s, upper: %s' % (SemverRange('~0.0.1').lower(), SemverRange('~0.0.1').upper())
-    print '"~0.1.1" lower: %s, upper: %s' % (SemverRange('~0.1.1').lower(), SemverRange('~0.1.1').upper())
-    print '"~1.1.1" lower: %s, upper: %s' % (SemverRange('~1.1.1').lower(), SemverRange('~1.1.1').upper())
-    print '"*"      lower: %s, upper: %s' % (SemverRange('*').lower(), SemverRange('*').upper())
-    print '"0.*"    lower: %s, upper: %s' % (SemverRange('0.*').lower(), SemverRange('0.*').upper())
-    print '"0.0.*"  lower: %s, upper: %s' % (SemverRange('0.0.*').lower(), SemverRange('0.0.*').upper())
+def test_semver_range():
+    def bounds(spec, lowe, high):
+        lowe = Semver(lowe) if lowe is not None else lowe
+        high = Semver(high) if high is not None else high
+        assert SemverRange(spec).lower() == lowe and SemverRange(spec).upper() == high
+    bounds('0',      '0.0.0', '1.0.0')
+    bounds('0.0',    '0.0.0', '0.1.0')
+    bounds('0.0.0',  '0.0.0', '0.0.1')
+    bounds('0.0.1',  '0.0.1', '0.0.2')
+    bounds('0.1.1',  '0.1.1', '0.2.0')
+    bounds('1.1.1',  '1.1.1', '2.0.0')
+    bounds('^0',     '0.0.0', '1.0.0')
+    bounds('^0.0',   '0.0.0', '0.1.0')
+    bounds('^0.0.0', '0.0.0', '0.0.1')
+    bounds('^0.0.1', '0.0.1', '0.0.2')
+    bounds('^0.1.1', '0.1.1', '0.2.0')
+    bounds('^1.1.1', '1.1.1', '2.0.0')
+    bounds('~0',     '0.0.0', '1.0.0')
+    bounds('~0.0',   '0.0.0', '0.1.0')
+    bounds('~0.0.0', '0.0.0', '0.1.0')
+    bounds('~0.0.1', '0.0.1', '0.1.0')
+    bounds('~0.1.1', '0.1.1', '0.2.0')
+    bounds('~1.1.1', '1.1.1', '1.2.0')
+    bounds('*',      '0.0.0', None)
+    bounds('0.*',    '0.0.0', '1.0.0')
+    bounds('0.0.*',  '0.0.0', '0.1.0')
 
 
 class Runner(object):
@@ -1211,8 +1216,6 @@ def args_parser():
                         help="target triple for machine we're bootstrapping for")
     parser.add_argument('--host', type=str, default=None,
                         help="host triple for machine we're bootstrapping on")
-    parser.add_argument('--test-semver', action='store_true',
-                        help="run semver parsing tests")
     parser.add_argument('--no-clone', action='store_true',
                         help="skip cloning crates index, --target-dir must point to an existing clone of the crates index")
     parser.add_argument('--no-git', action='store_true',
@@ -1249,10 +1252,6 @@ if __name__ == "__main__":
         # parse args
         parser = args_parser()
         args = parser.parse_args()
-
-        if args.test_semver:
-            test_semver()
-            sys.exit(0)
 
         # clone the cargo index
         if args.crate_index is None:
