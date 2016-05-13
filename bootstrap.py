@@ -54,7 +54,6 @@ Command Line Options
 --graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
---test-semver          triggers the execution of the Semver and SemverRange class tests.
 --urls-file <file>     file to write crate URLs to
 ```
 
