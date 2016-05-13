@@ -1236,6 +1236,9 @@ def open_or_clone_repo(rdir, rurl, no_clone):
         dbg('Cloning %s to %s' % (rurl, rdir))
         return git.clone(rurl, rdir)
 
+    if repo is None and no_clone is True:
+        repo = rdir
+
     return repo
 
 if __name__ == "__main__":
