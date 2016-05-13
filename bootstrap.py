@@ -1248,7 +1248,7 @@ def args_parser():
     parser.add_argument('--host', type=str, default=None,
                         help="host triple for machine we're bootstrapping on")
     parser.add_argument('--no-clone', action='store_true',
-                        help="skip cloning crates index, --target-dir must point to an existing clone of the crates index")
+                        help="skip cloning crates index, --crate-index must point to an existing clone of the crates index")
     parser.add_argument('--no-git', action='store_true',
                         help="don't assume that the crates index and cargo root are git repos; implies --no-clone")
     parser.add_argument('--no-clean', action='store_true',
