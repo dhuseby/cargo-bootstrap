@@ -331,21 +331,49 @@ class Semver(dict):
         return not (self == rhs)
 
 
-class SemverRange(dict):
+class SemverRange(object):
 
     def __init__(self, sv):
-        match = SV_RANGE.match(str(sv))
+        self._input = sv
+        self._lower = None
+        self._upper = None
+        self._op = None
+        self._semver = None
+
+        sv = str(sv)
+        svs = [x.strip() for x in sv.split(',')]
+
+        if len(svs) > 1:
+            self._op = '^'
+            for sr in svs:
+                rang = SemverRange(sr)
+                if rang.lower() is not None:
+                    if self._lower is None or rang.lower() < self._lower:
+                        self._lower = rang.lower()
+                if rang.upper() is not None:
+                    if self._upper is None or rang.upper() > self._upper:
+                        self._upper = rang.upper()
+                op, semver = rang.op_semver()
+                if semver is not None:
+                    if op == '>=':
+                        if self._lower is None or semver < self._lower:
+                            self._lower = semver
+                    if op == '<':
+                        if self._upper is None or semver > self._upper:
+                            self._upper = semver
+            return
+
+        match = SV_RANGE.match(sv)
         if match is None:
             raise ValueError('%s is not a valid semver range string' % sv)
 
-        self._input = sv
-        self.update(match.groupdict())
-        self.prerelease = PreRelease(self['prerelease'])
+        svm = match.groupdict()
+        op, major, minor, patch, prerelease, build = svm['op'], svm['major'], svm['minor'], svm['patch'], svm['prerelease'], svm['build']
+        prerelease = PreRelease(prerelease)
 
         # fix up the op
-        op = self['op']
         if op is None:
-            if self['major'] == '*' or self['minor'] == '*' or self['patch'] == '*':
+            if major == '*' or minor == '*' or patch == '*':
                 op = '*'
             else:
                 # if no op was specified and there are no wildcards, then op
@@ -357,171 +385,148 @@ class SemverRange(dict):
         if op not in ('<=', '>=', '<', '>', '=', '^', '~', '*'):
             raise ValueError('%s is not a valid semver operator' % op)
 
-        self['op'] = op
+        self._op = op
 
-    def parts_raw(self):
-        return (self['major'],self['minor'],self['patch'],self['prerelease'],self['build'])
+        # lower bound
+        def find_lower():
+            if op in ('<=', '<', '=', '>', '>='):
+                return None
+
+            if op == '*':
+                # wildcards specify a range
+                if major == '*':
+                    return Semver('0.0.0')
+                elif minor == '*':
+                    return Semver(major + '.0.0')
+                elif patch == '*':
+                    return Semver(major + '.' + minor + '.0')
+            elif op == '^':
+                # caret specifies a range
+                if patch is None:
+                    if minor is None:
+                        # ^0 means >=0.0.0 and <1.0.0
+                        return Semver(major + '.0.0')
+                    else:
+                        # ^0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + minor + '.0')
+                else:
+                    # ^0.0.1 means >=0.0.1 and <0.0.2
+                    # ^0.1.2 means >=0.1.2 and <0.2.0
+                    # ^1.2.3 means >=1.2.3 and <2.0.0
+                    if int(major) == 0:
+                        if int(minor) == 0:
+                            # ^0.0.1
+                            return Semver('0.0.' + patch)
+                        else:
+                            # ^0.1.2
+                            return Semver('0.' + minor + '.' + patch)
+                    else:
+                        # ^1.2.3
+                        return Semver(major + '.' + minor + '.' + patch)
+            elif op == '~':
+                # tilde specifies a minimal range
+                if patch is None:
+                    if minor is None:
+                        # ~0 means >=0.0.0 and <1.0.0
+                        return Semver(major + '.0.0')
+                    else:
+                        # ~0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + minor + '.0')
+                else:
+                    # ~0.0.1 means >=0.0.1 and <0.1.0
+                    # ~0.1.2 means >=0.1.2 and <0.2.0
+                    # ~1.2.3 means >=1.2.3 and <1.3.0
+                    return Semver(major + '.' + minor + '.' + patch)
+
+            raise RuntimeError('No lower bound')
+        self._lower = find_lower()
+
+        def find_upper():
+            if op in ('<=', '<', '=', '>', '>='):
+                return None
+
+            if op == '*':
+                # wildcards specify a range
+                if major == '*':
+                    return None
+                elif minor == '*':
+                    return Semver(str(int(major) + 1) + '.0.0')
+                elif patch == '*':
+                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
+            elif op == '^':
+                # caret specifies a range
+                if patch is None:
+                    if minor is None:
+                        # ^0 means >=0.0.0 and <1.0.0
+                        return Semver(str(int(major) + 1) + '.0.0')
+                    else:
+                        # ^0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + str(int(minor) + 1) + '.0')
+                else:
+                    # ^0.0.1 means >=0.0.1 and <0.0.2
+                    # ^0.1.2 means >=0.1.2 and <0.2.0
+                    # ^1.2.3 means >=1.2.3 and <2.0.0
+                    if int(major) == 0:
+                        if int(minor) == 0:
+                            # ^0.0.1
+                            return Semver('0.0.' + str(int(patch) + 1))
+                        else:
+                            # ^0.1.2
+                            return Semver('0.' + str(int(minor) + 1) + '.0')
+                    else:
+                        # ^1.2.3
+                        return Semver(str(int(major) + 1) + '.0.0')
+            elif op == '~':
+                # tilde specifies a minimal range
+                if patch is None:
+                    if minor is None:
+                        # ~0 means >=0.0.0 and <1.0.0
+                        return Semver(str(int(major) + 1) + '.0.0')
+                    else:
+                        # ~0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + str(int(minor) + 1) + '.0')
+                else:
+                    # ~0.0.1 means >=0.0.1 and <0.1.0
+                    # ~0.1.2 means >=0.1.2 and <0.2.0
+                    # ~1.2.3 means >=1.2.3 and <1.3.0
+                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
+
+            raise RuntimeError('No upper bound')
+        self._upper = find_upper()
+
+    def __repr__(self):
+        return "SemverRange(%s, op=%s, semver=%s, lower=%s, upper=%s)" % (repr(self._input), self._op, self._semver, self._lower, self._upper)
 
     def __str__(self):
-        major, minor, patch, prerelease, build = self.parts_raw()
-        if self['op'] == '*':
-            if self['major'] == '*':
-                return '*'
-            elif self['minor'] == '*':
-                return major + '*'
-            else:
-                return major + '.' + minor + '.*'
-        else:
-            s = self['op']
-            if major is None:
-                s += '0'
-            else:
-                s += major
-            s += '.'
-            if minor is None:
-                s += '0'
-            else:
-                s += minor
-            s += '.'
-            if patch is None:
-                s += '0'
-            else:
-                s += patch
-            if len(self.prerelease):
-                s += '-' + str(self.prerelease)
-            if build is not None:
-                s += '+' + build
-            return s
+        return self._input
 
     def lower(self):
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
-
-        if op in ('<=', '<', '=', '>', '>='):
-            return None
-
-        if op == '*':
-            # wildcards specify a range
-            if self['major'] == '*':
-                return Semver('0.0.0')
-            elif self['minor'] == '*':
-                return Semver(major + '.0.0')
-            elif self['patch'] == '*':
-                return Semver(major + '.' + minor + '.0')
-        elif op == '^':
-            # caret specifies a range
-            if patch is None:
-                if minor is None:
-                    # ^0 means >=0.0.0 and <1.0.0
-                    return Semver(major + '.0.0')
-                else:
-                    # ^0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + minor + '.0')
-            else:
-                # ^0.0.1 means >=0.0.1 and <0.0.2
-                # ^0.1.2 means >=0.1.2 and <0.2.0
-                # ^1.2.3 means >=1.2.3 and <2.0.0
-                if int(major) == 0:
-                    if int(minor) == 0:
-                        # ^0.0.1
-                        return Semver('0.0.' + patch)
-                    else:
-                        # ^0.1.2
-                        return Semver('0.' + minor + '.' + patch)
-                else:
-                    # ^1.2.3
-                    return Semver(major + '.' + minor + '.' + patch)
-        elif op == '~':
-            # tilde specifies a minimal range
-            if patch is None:
-                if minor is None:
-                    # ~0 means >=0.0.0 and <1.0.0
-                    return Semver(major + '.0.0')
-                else:
-                    # ~0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + minor + '.0')
-            else:
-                # ~0.0.1 means >=0.0.1 and <0.1.0
-                # ~0.1.2 means >=0.1.2 and <0.2.0
-                # ~1.2.3 means >=1.2.3 and <1.3.0
-                return Semver(major + '.' + minor + '.' + patch)
-
-        raise RuntimeError('No lower bound')
+        return self._lower
 
     def upper(self):
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
+        return self._upper
 
-        if op in ('<=', '<', '=', '>', '>='):
-            return None
-
-        if op == '*':
-            # wildcards specify a range
-            if self['major'] == '*':
-                return None
-            elif self['minor'] == '*':
-                return Semver(str(int(major) + 1) + '.0.0')
-            elif self['patch'] == '*':
-                return Semver(major + '.' + str(int(minor) + 1) + '.0')
-        elif op == '^':
-            # caret specifies a range
-            if patch is None:
-                if minor is None:
-                    # ^0 means >=0.0.0 and <1.0.0
-                    return Semver(str(int(major) + 1) + '.0.0')
-                else:
-                    # ^0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
-            else:
-                # ^0.0.1 means >=0.0.1 and <0.0.2
-                # ^0.1.2 means >=0.1.2 and <0.2.0
-                # ^1.2.3 means >=1.2.3 and <2.0.0
-                if int(major) == 0:
-                    if int(minor) == 0:
-                        # ^0.0.1
-                        return Semver('0.0.' + str(int(patch) + 1))
-                    else:
-                        # ^0.1.2
-                        return Semver('0.' + str(int(minor) + 1) + '.0')
-                else:
-                    # ^1.2.3
-                    return Semver(str(int(major) + 1) + '.0.0')
-        elif op == '~':
-            # tilde specifies a minimal range
-            if patch is None:
-                if minor is None:
-                    # ~0 means >=0.0.0 and <1.0.0
-                    return Semver(str(int(major) + 1) + '.0.0')
-                else:
-                    # ~0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
-            else:
-                # ~0.0.1 means >=0.0.1 and <0.1.0
-                # ~0.1.2 means >=0.1.2 and <0.2.0
-                # ~1.2.3 means >=1.2.3 and <1.3.0
-                return Semver(major + '.' + str(int(minor) + 1) + '.0')
-
-        raise RuntimeError('No upper bound')
+    def op_semver(self):
+        return self._op, self._semver
 
     def compare(self, sv):
-        if type(sv) is not Semver:
+        if not isinstance(sv, Semver):
             sv = Semver(sv)
 
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
-
+        op = self._op
         if op == '*':
-            if self['major'] == '*':
+            if self._semver['major'] == '*':
                 return sv >= Semver('0.0.0')
 
-            return (sv >= self.lower()) and (sv < self.upper())
+            return (sv >= self._lower) and (sv < self._upper)
         elif op == '^':
-            return (sv >= self.lower()) and (sv < self.upper())
+            return (sv >= self._lower) and (sv < self._upper)
         elif op == '~':
-            return (sv >= self.lower()) and (sv < self.upper())
+            return (sv >= self._lower) and (sv < self._upper)
         elif op == '<=':
             return sv <= self._semver
         elif op == '>=':
+            print sv, '>=', self._semver, sv >= self._semver
             return sv >= self._semver
         elif op == '<':
             return sv < self._semver
@@ -531,6 +536,7 @@ class SemverRange(dict):
             return sv == self._semver
 
         raise RuntimeError('Semver comparison failed to find a matching op')
+
 
 def test_semver():
     """
@@ -603,6 +609,10 @@ def test_semver_range():
     bounds('*',      '0.0.0', None)
     bounds('0.*',    '0.0.0', '1.0.0')
     bounds('0.0.*',  '0.0.0', '0.1.0')
+
+
+def test_semver_multirange():
+    assert SemverRange(">= 0.5, < 2.0").compare("1.0.0")
 
 
 class Runner(object):
