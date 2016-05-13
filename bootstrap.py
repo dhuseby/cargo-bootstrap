@@ -554,7 +554,7 @@ def test_semver_eq():
     assert Semver("1.1.1-alpha.1+beta") == Semver("1.1.1-alpha.1+beta")
     assert Semver("1.1.1-alpha.1+beta.1") == Semver("1.1.1-alpha.1+beta.1")
 
-def test_semver_lt():
+def test_semver_comparison():
     assert Semver("1") < Semver("2.0.0")
     assert Semver("1.1") < Semver("1.2.0")
     assert Semver("1.1.1") < Semver("1.1.2")
@@ -570,6 +570,12 @@ def test_semver_lt():
     assert Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta")
     assert Semver("0.5") < Semver("2.0")
     assert not (Semver("2.0") < Semver("0.5"))
+    assert not (Semver("0.5") > Semver("2.0"))
+    assert not (Semver("0.5") >= Semver("2.0"))
+    assert Semver("2.0") >= Semver("0.5")
+    assert Semver("2.0") > Semver("0.5")
+    assert not (Semver("2.0") > Semver("2.0"))
+    assert not (Semver("2.0") < Semver("2.0"))
 
 def test_semver_range():
     def bounds(spec, lowe, high):
