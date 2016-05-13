@@ -1318,6 +1318,7 @@ if __name__ == "__main__":
         print >> sys.stderr, "\nException:\n from %s, line %d:\n %s\n" % (frame[1], frame[2], e)
         parser.print_help()
         if not args.no_clean:
+            print "cleaning up %s" % (args.target_dir)
             shutil.rmtree(args.target_dir)
         sys.exit(1)
 
@@ -1358,7 +1359,7 @@ if __name__ == "__main__":
 
         # cleanup
         if not args.no_clean:
-            print "cleaning up..."
+            print "cleaning up %s..." % (args.target_dir)
             shutil.rmtree(args.target_dir)
         print "done"
 
@@ -1366,6 +1367,7 @@ if __name__ == "__main__":
         frame = inspect.trace()[-1]
         print >> sys.stderr, "\nException:\n from %s, line %d:\n %s\n" % (frame[1], frame[2], e)
         if not args.no_clean:
+            print "cleaning up %s..." % (args.target_dir)
             shutil.rmtree(args.target_dir)
         sys.exit(1)
 
