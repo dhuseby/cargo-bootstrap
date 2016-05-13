@@ -531,7 +531,6 @@ class SemverRange(object):
         elif op == '<=':
             return sv <= self._semver
         elif op == '>=':
-            print sv, '>=', self._semver, sv >= self._semver
             return sv >= self._semver
         elif op == '<':
             return sv < self._semver
