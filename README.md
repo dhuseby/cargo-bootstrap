@@ -49,10 +49,13 @@ Dependencies
 * dulwich -- used for working with git repos.
   https://git.samba.org/?p=jelmer/dulwich.git;a=summary
 
-Both can be installed via the pip tool:
+* requests -- used to download crates.
+  http://python-requests.org
+
+These can be installed via the pip tool:
 
 ```sh
-sudo pip install pytoml dulwich
+sudo pip install pytoml dulwich requests
 ```
 
 Command Line Options
