@@ -102,6 +102,7 @@ import sys
 import tarfile
 import tempfile
 import urlparse
+import socket
 import pytoml as toml
 import dulwich.porcelain as git
 
@@ -981,24 +982,31 @@ def dl_crate(url, depth=0):
         raise RuntimeError('too many redirects')
 
     loc = urlparse.urlparse(url)
-    if loc.scheme == 'https':
-        conn = httplib.HTTPSConnection(loc.netloc)
-    elif loc.scheme == 'http':
-        conn = httplib.HTTPConnection(loc.netloc)
-    else:
-        raise RuntimeError('unsupported url scheme: %s' % loc.scheme)
+    while True:
+        if loc.scheme == 'https':
+            conn = httplib.HTTPSConnection(loc.netloc)
+        elif loc.scheme == 'http':
+            conn = httplib.HTTPConnection(loc.netloc)
+        else:
+            raise RuntimeError('unsupported url scheme: %s' % loc.scheme)
 
-    conn.request("GET", loc.path)
-    res = conn.getresponse()
-    dbg('%sconnected to %s...%s' % ((' ' * depth), url, res.status))
-    headers = dict(res.getheaders())
-    if 'location' in headers and headers['location'] != url:
-        return dl_crate(headers['location'], depth + 1)
+        try:
+            dbg('%sconnecting to %s...' % ((' ' * depth), url))
+            conn.request("GET", loc.path)
+            res = conn.getresponse()
+            dbg('%sconnected to %s...%s' % ((' ' * depth), url, res.status))
+            headers = dict(res.getheaders())
+            if 'location' in headers and headers['location'] != url:
+                return dl_crate(headers['location'], depth + 1)
 
-    if URLS_FILE is not None:
-        with open(URLS_FILE, "a") as f:
-            f.write(url + "\n")
-    return res.read()
+            return res.read()
+        except socket.error, e:
+            dbg('%ssocket error: %s' % ((' ' * depth), e))
+        finally:
+            conn.close()
+            if URLS_FILE is not None:
+                with open(URLS_FILE, "a") as f:
+                    f.write(url + "\n")
 
 @idnt
 def dl_and_check_crate(tdir, name, ver, cksum):
