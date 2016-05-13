@@ -132,12 +132,6 @@ CRATES = {}
 UNRESOLVED = []
 PFX = []
 
-def idnt(f):
-    def do_indent(*cargs):
-        ret = f(*cargs)
-        return ret
-    return do_indent
-
 def dbgCtx(f):
     def do_dbg(self, *cargs):
         PFX.append(self.name())
@@ -976,7 +970,7 @@ class Crate(object):
         BUILT[str(self)] = str(by)
         return ({'name':self.name(), 'lib':output}, self._env, bcmd)
 
-@idnt
+
 def dl_crate(url, depth=0):
     if depth > 10:
         raise RuntimeError('too many redirects')
@@ -1008,7 +1002,6 @@ def dl_crate(url, depth=0):
                 with open(URLS_FILE, "a") as f:
                     f.write(url + "\n")
 
-@idnt
 def dl_and_check_crate(tdir, name, ver, cksum):
     cname = '%s-%s' % (name, ver)
     cdir = os.path.join(tdir, cname)
@@ -1035,7 +1028,7 @@ def dl_and_check_crate(tdir, name, ver, cksum):
 
     return cdir
 
-@idnt
+
 def crate_info_from_toml(cdir):
     try:
         with open(os.path.join(cdir, 'Cargo.toml'), 'rb') as ctoml:
@@ -1154,7 +1147,7 @@ def crate_info_from_toml(cdir):
 
     return (None, None, [], 'lib.rs')
 
-@idnt
+
 def crate_info_from_index(idir, name, svr):
     if len(name) == 1:
         ipath = os.path.join(idir, '1', name)
@@ -1195,6 +1188,7 @@ def crate_info_from_index(idir, name, svr):
 
     return (name, ver, deps, ftrs, cksum)
 
+
 def find_crate_by_name_and_semver(name, svr):
     for c in CRATES.itervalues():
         if c.name() == name and svr.compare(c.version()):
@@ -1203,6 +1197,7 @@ def find_crate_by_name_and_semver(name, svr):
         if c.name() == name and svr.compare(c.version()):
             return c
     return None
+
 
 def args_parser():
     parser = argparse.ArgumentParser(description='Cargo Bootstrap Tool')
@@ -1232,7 +1227,7 @@ def args_parser():
                         help="file to write crate URLs to")
     return parser
 
-@idnt
+
 def open_or_clone_repo(rdir, rurl, no_clone):
     try:
         repo = git.open_repo(rdir)
