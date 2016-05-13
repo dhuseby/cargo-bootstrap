@@ -1,3 +1,4 @@
 pytoml
 dulwich
 pytest
+requests

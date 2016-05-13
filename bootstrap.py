@@ -90,7 +90,6 @@ specifying it as the `--local-cargo` option to Cargo's `./configure` script.
 import argparse
 import cStringIO
 import hashlib
-import httplib
 import inspect
 import json
 import os
@@ -102,6 +101,7 @@ import tarfile
 import tempfile
 import urlparse
 import socket
+import requests
 import pytoml as toml
 import dulwich.porcelain as git
 
@@ -1007,32 +1007,15 @@ def dl_crate(url, depth=0):
     if depth > 10:
         raise RuntimeError('too many redirects')
 
-    loc = urlparse.urlparse(url)
-    while True:
-        if loc.scheme == 'https':
-            conn = httplib.HTTPSConnection(loc.netloc)
-        elif loc.scheme == 'http':
-            conn = httplib.HTTPConnection(loc.netloc)
-        else:
-            raise RuntimeError('unsupported url scheme: %s' % loc.scheme)
-
-        try:
-            dbg('%sconnecting to %s...' % ((' ' * depth), url))
-            conn.request("GET", loc.path)
-            res = conn.getresponse()
-            dbg('%sconnected to %s...%s' % ((' ' * depth), url, res.status))
-            headers = dict(res.getheaders())
-            if 'location' in headers and headers['location'] != url:
-                return dl_crate(headers['location'], depth + 1)
-
-            return res.read()
-        except socket.error, e:
-            dbg('%ssocket error: %s' % ((' ' * depth), e))
-        finally:
-            conn.close()
-            if URLS_FILE is not None:
-                with open(URLS_FILE, "a") as f:
-                    f.write(url + "\n")
+    r = requests.get(url)
+    try:
+        dbg('%sconnected to %s...%s' % ((' ' * depth), r.url, r.status_code))
+        if URLS_FILE is not None:
+            with open(URLS_FILE, "a") as f:
+                f.write(url + "\n")
+        return r.content
+    finally:
+        r.close()
 
 def dl_and_check_crate(tdir, name, ver, cksum):
     cname = '%s-%s' % (name, ver)
