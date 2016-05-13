@@ -1,5 +1,19 @@
+[![Build Status](https://travis-ci.org/krig/cargo-bootstrap.svg?branch=master)](https://travis-ci.org/krig/cargo-bootstrap)
+
 About
 =====
+
+This is a fork / branch of patches in-progress for the upstream
+version of cargo-bootstrap, hosted
+[here](https://github.com/dhuseby/cargo-bootstrap).
+
+Some of the changes are:
+
+* Use py.test and Travis CI to run tests
+
+* Fix various issues with Semver handling
+
+OK, here's the original About message...
 
 This python script is design to do the bare minimum to compile and link the
 Cargo binary for the purposes of bootstrapping itself on a new platform for
@@ -52,7 +66,6 @@ Command Line Options
 --graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
---test-semver          triggers the execution of the Semver and SemverRange class tests.
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
