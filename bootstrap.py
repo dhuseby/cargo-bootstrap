@@ -292,13 +292,19 @@ class Semver(dict):
         rmaj,rmin,rpat,rpre,_ = rhs.parts()
         if lmaj < rmaj:
             return True
-        elif lmin < rmin:
+        if lmaj > rmaj:
+            return False
+        if lmin < rmin:
             return True
-        elif lpat < rpat:
+        if lmin > rmin:
+            return False
+        if lpat < rpat:
             return True
-        elif lpre is not None and rpre is None:
+        if lpat > rpat:
+            return False
+        if lpre is not None and rpre is None:
             return True
-        elif lpre is not None and rpre is not None:
+        if lpre is not None and rpre is not None:
             if self.prerelease < rhs.prerelease:
                 return True
         return False
@@ -563,6 +569,8 @@ def test_semver_lt():
     assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta")
     assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-alpha.1+beta")
     assert Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta")
+    assert Semver("0.5") < Semver("2.0")
+    assert not (Semver("2.0") < Semver("0.5"))
 
 def test_semver_range():
     def bounds(spec, lowe, high):
