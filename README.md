@@ -11,7 +11,9 @@ Some of the changes are:
 
 * Use py.test and Travis CI to run tests
 
-* Fix various issues with Semver handling
+* Fixes a bug in the semantic version check where it previously thought 2.0.0 < 0.5.0
+
+* Adds limited support for ranges as multiple specs, like so: >= 0.5, < 2.0
 
 OK, here's the original About message...
 
