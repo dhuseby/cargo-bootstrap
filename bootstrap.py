@@ -1027,7 +1027,7 @@ def dl_crate(url, depth=0):
 
         if URLS_FILE is not None:
             with open(URLS_FILE, "a") as f:
-                f.write(r.history[-1].url + "\n")
+                f.write(r.url + "\n")
 
         return r.content
     finally:
