@@ -22,7 +22,7 @@ rm -f "$rpmdir/$packagename.spec.$$"
 spec_header() {
 	cat > "$rpmdir/$packagename.spec.$$" <<EOF
 #
-# spec file for package cargo
+# spec file for package cargo-bootstrap
 #
 # Copyright (c) 2016 Michal Vyskocil, michal.vyskocil@opensuse.org
 # Copyright (c) 2016 Kristoffer Gronlund, kgronlund@suse.com
@@ -43,7 +43,7 @@ Name:           cargo-bootstrap
 Version:        $1
 Release:        1
 License:        MIT or Apache-2.0
-Summary:        The Rust package manager
+Summary:        Bootstrap cargo from minimal dependencies
 Url:            https://github.com/rust-lang/cargo
 Group:          Development/Languages/Other
 
