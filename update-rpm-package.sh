@@ -77,8 +77,8 @@ update_archive() {
 
 echo "remove old archives"
 rm -f "$rpmdir"/*.tar.xz
-update_archive 0 "https://github.com/rust-lang/cargo.git" "cargo" "build/cargo"
-update_archive 1 "https://github.com/krig/cargo-bootstrap.git" "cargo-bootstrap" "."
+update_archive 0 "https://github.com/krig/cargo-bootstrap.git" "cargo-bootstrap" "."
+update_archive 1 "https://github.com/rust-lang/cargo.git" "cargo" "build/cargo"
 update_archive 2 "https://github.com/rust-lang/crates.io-index.git" "crates.io-index" "build/crates.io-index"
 
 
@@ -115,13 +115,13 @@ Cargo downloads your Rust project’s dependencies and compiles your project.
 %setup -q -n %{name} -D -T -a 2
 
 # crates unpacking
-mkdir -p cargo-bootstrap/cache
+mkdir -p cache
 
 EOF
 
 I=100
 while read line; do
-    spec_append "cp %{SOURCE$I} cargo-bootstrap/cache"
+    spec_append "cp %{SOURCE$I} cache"
     I=$((I+1))
 done < ./build/urls.txt
 spec_append ""
@@ -135,8 +135,8 @@ TARGET_CPU="%{_target_cpu}"
 TARGET_CPU="i686"
 %endif
 
-cd cargo-bootstrap
-./build.sh compile
+mkdir out
+"cargo-bootstrap/bootstrap.py" --crate-index "$(pwd)/crates.io-index" --target-dir "$(pwd)/out" --no-clone --no-clean --target "$TARGET_CPU" --blacklist "winapi winapi-build advapi32-sys kernel32-sys" --include-optional "miniz-sys"
 
 %install
 mkdir -p %{buildroot}/%{_bindir}
