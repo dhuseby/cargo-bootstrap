@@ -136,18 +136,24 @@ TARGET_CPU="i686"
 %endif
 
 mkdir out
-"cargo-bootstrap/bootstrap.py" --crate-index "$(pwd)/crates.io-index" --target-dir "$(pwd)/out" --no-clone --no-clean --target "$TARGET_CPU" --blacklist "winapi winapi-build advapi32-sys kernel32-sys" --include-optional "miniz-sys"
+bootstrapdir="\$(pwd)"
+cd cargo
+\$bootstrapdir/bootstrap.py --crate-index "\$bootstrapdir/crates.io-index" --target-dir "\$bootstrapdir/out" --patchdir "\$bootstrapdir/patches" --crate-cache "\$bootstrapdir/cache" --no-clone --no-clean --target "\$TARGET_CPU-unknown-linux-gnu" --blacklist "winapi winapi-build advapi32-sys kernel32-sys" --include-optional "miniz-sys"
+cd ..
 
 %install
-mkdir -p %{buildroot}/%{_bindir}
-install -m 0755 cargo-bootstrap/build/out/cargo-0_*_0 %{buildroot}%{_prefix}/share/%{name}/cargo
-install -m 0644 cargo-bootstrap/build/cargo/LICENSE-APACHE %{buildroot}%{_docdir}/%{name}
-install -m 0644 cargo-bootstrap/build/cargo/LICENSE-MIT %{buildroot}%{_docdir}/%{name}
-install -m 0644 cargo-bootstrap/build/cargo/README.md %{buildroot}%{_docdir}/%{name}
+mkdir -p %{buildroot}%{_libexecdir}/%{name}
+mkdir -p %{buildroot}%{_docdir}/%{name}
+install -m 0755 out/cargo-0_*_0 %{buildroot}%{_libexecdir}/%{name}/cargo
+install -m 0644 cargo/LICENSE-APACHE %{buildroot}%{_docdir}/%{name}
+install -m 0644 cargo/LICENSE-MIT %{buildroot}%{_docdir}/%{name}
+install -m 0644 cargo/README.md %{buildroot}%{_docdir}/%{name}
 
 %files
 %defattr(-,root,root)
-%{_prefix}/share/%{name}/cargo
+%{_libexecdir}/%{name}
+%{_libexecdir/%{name}/cargo
+%{_docdir}/%{name}
 %{_docdir}/%{name}/LICENSE-APACHE
 %{_docdir}/%{name}/LICENSE-MIT
 %{_docdir}/%{name}/README.md
