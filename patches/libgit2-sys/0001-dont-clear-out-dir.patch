@@ -1,0 +1,13 @@
+From: Luca Bruno <lucab@debian.org>
+Description: Misc fixes to build libgit2-sys
+Forwarded: not-needed
+--- a/build.rs
++++ b/build.rs
+@@ -97,7 +97,6 @@
+         cfg.define("USE_OPENSSL", "OFF");
+     }
+ 
+-    let _ = fs::remove_dir_all(env::var("OUT_DIR").unwrap());
+     t!(fs::create_dir_all(env::var("OUT_DIR").unwrap()));
+ 
+     let dst = cfg.define("BUILD_SHARED_LIBS", "OFF")
