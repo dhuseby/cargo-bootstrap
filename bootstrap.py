@@ -56,7 +56,9 @@ Command Line Options
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --urls-file <file>     file to write crate URLs to
 --blacklist <crates>   list of blacklisted crates to skip
+--include-optional <crates> list of optional crates to include
 --patchdir <dir>       directory containing patches to apply to crates after fetching them
+--save-crate           if set, save .crate file when downloading
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -113,6 +115,7 @@ TARGET = None
 HOST = None
 GRAPH = None
 URLS_FILE = None
+CRATE_CACHE = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
@@ -135,6 +138,7 @@ CVER = re.compile("-([^-]+)$")
 UNRESOLVED = []
 PFX = []
 BLACKLIST = []
+INCLUDE_OPTIONAL = []
 
 def dbgCtx(f):
     def do_dbg(self, *cargs):
@@ -792,7 +796,7 @@ class Crate(object):
                     continue
 
                 optional = d.get('optional', False)
-                if optional:
+                if optional and d['name'] not in INCLUDE_OPTIONAL:
                     print ''
                     dbg('Skipping optional dep %s' % d['name'])
                     continue
@@ -1020,9 +1024,11 @@ def dl_crate(url, depth=0):
     r = requests.get(url)
     try:
         dbg('%sconnected to %s...%s' % ((' ' * depth), r.url, r.status_code))
+
         if URLS_FILE is not None:
             with open(URLS_FILE, "a") as f:
-                f.write(url + "\n")
+                f.write(r.history[-1].url + "\n")
+
         return r.content
     finally:
         r.close()
@@ -1034,10 +1040,7 @@ def dl_and_check_crate(tdir, name, ver, cksum):
         dbg('skipping %s...already downloaded' % cname)
         return cdir
 
-    if not os.path.isdir(cdir):
-        dbg('Downloading %s source to %s' % (cname, cdir))
-        dl = CRATE_API_DL % (name, ver)
-        buf = dl_crate(dl)
+    def check_checksum(buf):
         if (cksum is not None):
             h = hashlib.sha256()
             h.update(buf)
@@ -1045,6 +1048,28 @@ def dl_and_check_crate(tdir, name, ver, cksum):
                 dbg('Checksum is good...%s' % cksum)
             else:
                 dbg('Checksum is BAD (%s != %s)' % (h.hexdigest(), cksum))
+
+    if CRATE_CACHE:
+        cachename = os.path.join(CRATE_CACHE, "%s.crate" % (cname))
+        if os.path.isfile(cachename):
+            dbg('found crate in cache...%s.crate' % (cname))
+            buf = open(cachename).read()
+            check_checksum(buf)
+            with tarfile.open(fileobj=cStringIO.StringIO(buf)) as tf:
+                dbg('unpacking result to %s...' % cdir)
+                tf.extractall(path=tdir)
+            return cdir
+
+    if not os.path.isdir(cdir):
+        dbg('Downloading %s source to %s' % (cname, cdir))
+        dl = CRATE_API_DL % (name, ver)
+        buf = dl_crate(dl)
+        check_checksum(buf)
+
+        if CRATE_CACHE:
+            dbg("saving crate to %s/%s.crate..." % (CRATE_CACHE, cname))
+            with open(os.path.join(CRATE_CACHE, "%s.crate" % (cname)), "wb") as f:
+                f.write(buf)
 
         fbuf = cStringIO.StringIO(buf)
         with tarfile.open(fileobj=fbuf) as tf:
@@ -1269,8 +1294,12 @@ def args_parser():
                         help="file to write crate URLs to")
     parser.add_argument('--blacklist', type=str, default="",
                         help="space-separated list of crates to skip")
+    parser.add_argument('--include-optional', type=str, default="",
+                        help="space-separated list of optional crates to include")
     parser.add_argument('--patchdir', type=str,
                         help="directory with patches to apply after downloading crates. organized by crate/NNNN-description.patch")
+    parser.add_argument('--crate-cache', type=str,
+                        help="download and save crates to crate cache (directory)")
     return parser
 
 
@@ -1301,8 +1330,17 @@ def patch_crates(targetdir, patchdir):
         <patch>.patch
     """
     for patch in glob(os.path.join(patchdir, '*', '*.patch')):
-        cratename = os.path.basename(os.path.dirname(patch))
-        for cratedir in glob(os.path.join(targetdir, '%s-*' % (cratename))):
+        crateid = os.path.basename(os.path.dirname(patch))
+        m = re.match(r'^([A-Za-z0-9_-]+?)(?:-([\d.]+))?$', crateid)
+        if m:
+            cratename = m.group(1)
+        else:
+            cratename = crateid
+        if cratename != crateid:
+            dirs = glob(os.path.join(targetdir, crateid))
+        else:
+            dirs = glob(os.path.join(targetdir, '%s-*' % (cratename)))
+        for cratedir in dirs:
             # check if patch has been applied
             patchpath = os.path.abspath(patch)
             p = subprocess.Popen(['patch', '--dry-run', '-s', '-f', '-F', '10', '-p1', '-i', patchpath], cwd=cratedir)
@@ -1333,6 +1371,9 @@ if __name__ == "__main__":
         HOST = args.host
         URLS_FILE = args.urls_file
         BLACKLIST = args.blacklist.split()
+        INCLUDE_OPTIONAL = args.include_optional.split()
+        if args.crate_cache and os.path.isdir(args.crate_cache):
+            CRATE_CACHE = os.path.abspath(args.crate_cache)
 
         if not args.no_git:
             index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
