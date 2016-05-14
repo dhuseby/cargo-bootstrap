@@ -55,6 +55,8 @@ Command Line Options
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
 --urls-file <file>     file to write crate URLs to
+--blacklist <crates>   list of blacklisted crates to skip
+--patchdir <dir>       directory containing patches to apply to crates after fetching them
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -132,6 +134,7 @@ CRATES = {}
 CVER = re.compile("-([^-]+)$")
 UNRESOLVED = []
 PFX = []
+BLACKLIST = []
 
 def dbgCtx(f):
     def do_dbg(self, *cargs):
@@ -805,7 +808,9 @@ class Crate(object):
                         #import pdb; pdb.set_trace()
                         svr = dcrate.version().as_range()
                     name, ver, ideps, ftrs, cksum = crate_info_from_index(idir, d['name'], svr)
-                    if dcrate is None:
+                    if name in BLACKLIST:
+                        dbg('Found in blacklist, skipping %s' % (name))
+                    elif dcrate is None:
                         if nodl:
                             cdir = find_downloaded_crate(tdir, name, svr)
                         else:
@@ -821,17 +826,18 @@ class Crate(object):
                     name, ver, ideps, build = crate_info_from_toml(cdir)
                     deps += ideps
 
-                try:
-                    if dcrate is None:
-                        dcrate = Crate(name, ver, deps, cdir, build)
-                        if str(dcrate) in CRATES:
-                            dcrate = CRATES[str(dcrate)]
-                    UNRESOLVED.append(dcrate)
-                    if graph is not None:
-                        print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
+                if name not in BLACKLIST:
+                    try:
+                        if dcrate is None:
+                            dcrate = Crate(name, ver, deps, cdir, build)
+                            if str(dcrate) in CRATES:
+                                dcrate = CRATES[str(dcrate)]
+                        UNRESOLVED.append(dcrate)
+                        if graph is not None:
+                            print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
 
-                except:
-                    dcrate = None
+                    except:
+                        dcrate = None
 
                 # clean up the list of features that are enabled
                 tftrs = d.get('features', [])
@@ -1261,6 +1267,10 @@ def args_parser():
                         help="output a dot graph of the dependencies")
     parser.add_argument('--urls-file', type=str, default=None,
                         help="file to write crate URLs to")
+    parser.add_argument('--blacklist', type=str, default="",
+                        help="space-separated list of crates to skip")
+    parser.add_argument('--patchdir', type=str,
+                        help="directory with patches to apply after downloading crates. organized by crate/NNNN-description.patch")
     return parser
 
 
@@ -1280,6 +1290,33 @@ def open_or_clone_repo(rdir, rurl, no_clone):
 
     return repo
 
+
+def patch_crates(targetdir, patchdir):
+    """
+    Apply patches in patchdir to downloaded crates
+    patchdir organization:
+
+    <patchdir>/
+      <crate>/
+        <patch>.patch
+    """
+    for patch in glob(os.path.join(patchdir, '*', '*.patch')):
+        cratename = os.path.basename(os.path.dirname(patch))
+        for cratedir in glob(os.path.join(targetdir, '%s-*' % (cratename))):
+            # check if patch has been applied
+            patchpath = os.path.abspath(patch)
+            p = subprocess.Popen(['patch', '--dry-run', '-s', '-f', '-F', '10', '-p1', '-i', patchpath], cwd=cratedir)
+            rc = p.wait()
+            if rc == 0:
+                dbg("patching %s with patch %s" % (os.path.basename(cratedir), os.path.basename(patch)))
+                p = subprocess.Popen(['patch', '-s', '-F', '10', '-p1', '-i', patchpath], cwd=cratedir)
+                rc = p.wait()
+                if rc != 0:
+                    dbg("%s: failed to apply %s (rc=%s)" % (os.path.basename(cratedir), os.path.basename(patch), rc))
+            else:
+                dbg("%s: %s does not apply (rc=%s)" % (os.path.basename(cratedir), os.path.basename(patch), rc))
+
+
 if __name__ == "__main__":
     try:
         # parse args
@@ -1295,6 +1332,7 @@ if __name__ == "__main__":
         TARGET = args.target
         HOST = args.host
         URLS_FILE = args.urls_file
+        BLACKLIST = args.blacklist.split()
 
         if not args.no_git:
             index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
@@ -1345,6 +1383,13 @@ if __name__ == "__main__":
         if args.graph:
             print >> GRAPH, "}"
             GRAPH.close()
+
+        if args.patchdir:
+            print ''
+            print '========================'
+            print '===== PATCH CRATES ====='
+            print '========================'
+            patch_crates(args.target_dir, args.patchdir)
 
         if args.download:
             print "done downloading..."
