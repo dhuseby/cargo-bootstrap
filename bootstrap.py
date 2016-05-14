@@ -1209,8 +1209,8 @@ def crate_info_from_toml(cdir):
             return (name, ver, deps, build)
 
     except Exception, e:
-        import pdb; pdb.set_trace()
         dbg('failed to load toml file for: %s (%s)' % (cdir, str(e)))
+        import pdb; pdb.set_trace()
 
     return (None, None, [], 'lib.rs')
 
