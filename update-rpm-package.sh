@@ -55,7 +55,7 @@ spec_append() {
 	echo "$@" >> "$rpmdir/$packagename.spec.$$"
 }
 
-spec_header "$(cd build/cargo; git describe)"
+spec_header "$(cd build/cargo; git describe | sed 's/-/+git/' | sed 's/-/./')"
 
 update_archive() {
 	n=$1
