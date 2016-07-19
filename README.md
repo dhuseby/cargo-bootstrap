@@ -1,7 +1,9 @@
+[![Build Status](https://travis-ci.org/krig/cargo-bootstrap.svg?branch=master)](https://travis-ci.org/krig/cargo-bootstrap)
+
 About
 =====
 
-This python script is design to do the bare minimum to compile and link the
+This python script is designed to do the bare minimum to compile and link the
 Cargo binary for the purposes of bootstrapping itself on a new platform for
 which cross-compiling isn't possible.  I wrote this specifically to bootstrap
 Cargo on [Bitrig](https://bitrig.org).  Bitrig is a fork of OpenBSD that uses
@@ -33,10 +35,13 @@ Dependencies
 * dulwich -- used for working with git repos.
   https://git.samba.org/?p=jelmer/dulwich.git;a=summary
 
-Both can be installed via the pip tool:
+* requests -- used to download crates.
+  http://python-requests.org
+
+These can be installed via the pip tool:
 
 ```sh
-sudo pip install pytoml dulwich
+sudo pip install pytoml dulwich requests
 ```
 
 Command Line Options
@@ -46,13 +51,17 @@ Command Line Options
 --cargo-root <path>    specify the path to the cargo repo root.
 --target-dir <path>    specify the location to store build results.
 --crate-index <path>   path to where crates.io index shoudl be cloned
---no-clone             don't clone crates.io index, --crate-index must point to existing clone.
---no-clean             don't remove the folders created during bootstrapping.
---download             only download the crates needed to bootstrap cargo.
---graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
---test-semver          triggers the execution of the Semver and SemverRange class tests.
+--no-clone             don't clone crates.io index, --crate-index must point to existing clone.
+--no-git               don't assume that the crates index and cargo root are git repos; implies --no-clone
+--no-clean             don't remove the folders created during bootstrapping.
+--download             only download the crates needed to bootstrap cargo.
+--no-download          don't download any crates (fail if any do not exist)
+--graph                output dot format graph of dependencies.
+--urls-file <file>     file to write crate URLs to
+--blacklist <crates>   list of blacklisted crates to skip
+--patchdir <dir>       directory containing patches to apply to crates after fetching them
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The

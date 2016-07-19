@@ -54,7 +54,11 @@ Command Line Options
 --graph                output dot format graph of dependencies.
 --target <triple>      build target: e.g. x86_64-unknown-bitrig
 --host <triple>        host machine: e.g. x86_64-unknown-linux-gnu
---test-semver          triggers the execution of the Semver and SemverRange class tests.
+--urls-file <file>     file to write crate URLs to
+--blacklist <crates>   list of blacklisted crates to skip
+--include-optional <crates> list of optional crates to include
+--patchdir <dir>       directory containing patches to apply to crates after fetching them
+--save-crate           if set, save .crate file when downloading
 ```
 
 The `--cargo-root` option defaults to the current directory if unspecified.  The
@@ -87,56 +91,57 @@ After the script completed, there is a Cargo executable named `cargo-0_2_0` in
 specifying it as the `--local-cargo` option to Cargo's `./configure` script.
 """
 
-import argparse, \
-       cStringIO, \
-       hashlib, \
-       httplib, \
-       inspect, \
-       json, \
-       os, \
-       re, \
-       shutil, \
-       subprocess, \
-       sys, \
-       tarfile, \
-       tempfile, \
-       urlparse
+import argparse
+import cStringIO
+import hashlib
+import inspect
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urlparse
+import socket
+import requests
 import pytoml as toml
 import dulwich.porcelain as git
+from glob import glob
+
 
 TARGET = None
 HOST = None
 GRAPH = None
+URLS_FILE = None
+CRATE_CACHE = None
 CRATES_INDEX = 'git://github.com/rust-lang/crates.io-index.git'
 CARGO_REPO = 'git://github.com/rust-lang/cargo.git'
 CRATE_API_DL = 'https://crates.io/api/v1/crates/%s/%s/download'
-SV_RANGE = re.compile('^(?P<op>(?:\<=|\>=|=|\<|\>|\^|\~))?\s*'
-                      '(?P<major>(?:\*|0|[1-9][0-9]*))'
-                      '(\.(?P<minor>(?:\*|0|[1-9][0-9]*)))?'
-                      '(\.(?P<patch>(?:\*|0|[1-9][0-9]*)))?'
-                      '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
-                      '(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
-SEMVER = re.compile('^\s*(?P<major>(?:0|[1-9][0-9]*))'
-                    '(\.(?P<minor>(?:0|[1-9][0-9]*)))?'
-                    '(\.(?P<patch>(?:0|[1-9][0-9]*)))?'
-                    '(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
-                    '(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
-BSCRIPT = re.compile('^cargo:(?P<key>([^\s=]+))(=(?P<value>.+))?$')
+SV_RANGE = re.compile(r'^(?P<op>(?:\<=|\>=|=|\<|\>|\^|\~))?\s*'
+                      r'(?P<major>(?:\*|0|[1-9][0-9]*))'
+                      r'(\.(?P<minor>(?:\*|0|[1-9][0-9]*)))?'
+                      r'(\.(?P<patch>(?:\*|0|[1-9][0-9]*)))?'
+                      r'(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
+                      r'(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
+SEMVER = re.compile(r'^\s*(?P<major>(?:0|[1-9][0-9]*))'
+                    r'(\.(?P<minor>(?:0|[1-9][0-9]*)))?'
+                    r'(\.(?P<patch>(?:0|[1-9][0-9]*)))?'
+                    r'(\-(?P<prerelease>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?'
+                    r'(\+(?P<build>[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$')
+BSCRIPT = re.compile(r'^cargo:(?P<key>([^\s=]+))(=(?P<value>.+))?$')
 BNAME = re.compile('^(lib)?(?P<name>([^_]+))(_.*)?$')
 BUILT = {}
 CRATES = {}
+CVER = re.compile("-([^-]+)$")
 UNRESOLVED = []
 PFX = []
-
-def idnt(f):
-    def do_indent(*cargs):
-        ret = f(*cargs)
-        return ret
-    return do_indent
+BLACKLIST = []
+INCLUDE_OPTIONAL = []
 
 def dbgCtx(f):
     def do_dbg(self, *cargs):
-        global PFX
         PFX.append(self.name())
         ret = f(self, *cargs)
         PFX.pop()
@@ -144,8 +149,8 @@ def dbgCtx(f):
     return do_dbg
 
 def dbg(s):
-    global PFX
     print '%s: %s' % (':'.join(PFX), s)
+
 
 class PreRelease(object):
 
@@ -295,13 +300,19 @@ class Semver(dict):
         rmaj,rmin,rpat,rpre,_ = rhs.parts()
         if lmaj < rmaj:
             return True
-        elif lmin < rmin:
+        if lmaj > rmaj:
+            return False
+        if lmin < rmin:
             return True
-        elif lpat < rpat:
+        if lmin > rmin:
+            return False
+        if lpat < rpat:
             return True
-        elif lpre is not None and rpre is None:
+        if lpat > rpat:
+            return False
+        if lpre is not None and rpre is None:
             return True
-        elif lpre is not None and rpre is not None:
+        if lpre is not None and rpre is not None:
             if self.prerelease < rhs.prerelease:
                 return True
         return False
@@ -329,21 +340,49 @@ class Semver(dict):
         return not (self == rhs)
 
 
-class SemverRange(dict):
+class SemverRange(object):
 
     def __init__(self, sv):
-        match = SV_RANGE.match(str(sv))
+        self._input = sv
+        self._lower = None
+        self._upper = None
+        self._op = None
+        self._semver = None
+
+        sv = str(sv)
+        svs = [x.strip() for x in sv.split(',')]
+
+        if len(svs) > 1:
+            self._op = '^'
+            for sr in svs:
+                rang = SemverRange(sr)
+                if rang.lower() is not None:
+                    if self._lower is None or rang.lower() < self._lower:
+                        self._lower = rang.lower()
+                if rang.upper() is not None:
+                    if self._upper is None or rang.upper() > self._upper:
+                        self._upper = rang.upper()
+                op, semver = rang.op_semver()
+                if semver is not None:
+                    if op == '>=':
+                        if self._lower is None or semver < self._lower:
+                            self._lower = semver
+                    if op == '<':
+                        if self._upper is None or semver > self._upper:
+                            self._upper = semver
+            return
+
+        match = SV_RANGE.match(sv)
         if match is None:
             raise ValueError('%s is not a valid semver range string' % sv)
 
-        self._input = sv
-        self.update(match.groupdict())
-        self.prerelease = PreRelease(self['prerelease'])
+        svm = match.groupdict()
+        op, major, minor, patch, prerelease, build = svm['op'], svm['major'], svm['minor'], svm['patch'], svm['prerelease'], svm['build']
+        prerelease = PreRelease(prerelease)
 
         # fix up the op
-        op = self['op']
         if op is None:
-            if self['major'] == '*' or self['minor'] == '*' or self['patch'] == '*':
+            if major == '*' or minor == '*' or patch == '*':
                 op = '*'
             else:
                 # if no op was specified and there are no wildcards, then op
@@ -355,168 +394,147 @@ class SemverRange(dict):
         if op not in ('<=', '>=', '<', '>', '=', '^', '~', '*'):
             raise ValueError('%s is not a valid semver operator' % op)
 
-        self['op'] = op
+        self._op = op
 
-    def parts_raw(self):
-        return (self['major'],self['minor'],self['patch'],self['prerelease'],self['build'])
+        # lower bound
+        def find_lower():
+            if op in ('<=', '<', '=', '>', '>='):
+                return None
+
+            if op == '*':
+                # wildcards specify a range
+                if major == '*':
+                    return Semver('0.0.0')
+                elif minor == '*':
+                    return Semver(major + '.0.0')
+                elif patch == '*':
+                    return Semver(major + '.' + minor + '.0')
+            elif op == '^':
+                # caret specifies a range
+                if patch is None:
+                    if minor is None:
+                        # ^0 means >=0.0.0 and <1.0.0
+                        return Semver(major + '.0.0')
+                    else:
+                        # ^0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + minor + '.0')
+                else:
+                    # ^0.0.1 means >=0.0.1 and <0.0.2
+                    # ^0.1.2 means >=0.1.2 and <0.2.0
+                    # ^1.2.3 means >=1.2.3 and <2.0.0
+                    if int(major) == 0:
+                        if int(minor) == 0:
+                            # ^0.0.1
+                            return Semver('0.0.' + patch)
+                        else:
+                            # ^0.1.2
+                            return Semver('0.' + minor + '.' + patch)
+                    else:
+                        # ^1.2.3
+                        return Semver(major + '.' + minor + '.' + patch)
+            elif op == '~':
+                # tilde specifies a minimal range
+                if patch is None:
+                    if minor is None:
+                        # ~0 means >=0.0.0 and <1.0.0
+                        return Semver(major + '.0.0')
+                    else:
+                        # ~0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + minor + '.0')
+                else:
+                    # ~0.0.1 means >=0.0.1 and <0.1.0
+                    # ~0.1.2 means >=0.1.2 and <0.2.0
+                    # ~1.2.3 means >=1.2.3 and <1.3.0
+                    return Semver(major + '.' + minor + '.' + patch)
+
+            raise RuntimeError('No lower bound')
+        self._lower = find_lower()
+
+        def find_upper():
+            if op in ('<=', '<', '=', '>', '>='):
+                return None
+
+            if op == '*':
+                # wildcards specify a range
+                if major == '*':
+                    return None
+                elif minor == '*':
+                    return Semver(str(int(major) + 1) + '.0.0')
+                elif patch == '*':
+                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
+            elif op == '^':
+                # caret specifies a range
+                if patch is None:
+                    if minor is None:
+                        # ^0 means >=0.0.0 and <1.0.0
+                        return Semver(str(int(major) + 1) + '.0.0')
+                    else:
+                        # ^0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + str(int(minor) + 1) + '.0')
+                else:
+                    # ^0.0.1 means >=0.0.1 and <0.0.2
+                    # ^0.1.2 means >=0.1.2 and <0.2.0
+                    # ^1.2.3 means >=1.2.3 and <2.0.0
+                    if int(major) == 0:
+                        if int(minor) == 0:
+                            # ^0.0.1
+                            return Semver('0.0.' + str(int(patch) + 1))
+                        else:
+                            # ^0.1.2
+                            return Semver('0.' + str(int(minor) + 1) + '.0')
+                    else:
+                        # ^1.2.3
+                        return Semver(str(int(major) + 1) + '.0.0')
+            elif op == '~':
+                # tilde specifies a minimal range
+                if patch is None:
+                    if minor is None:
+                        # ~0 means >=0.0.0 and <1.0.0
+                        return Semver(str(int(major) + 1) + '.0.0')
+                    else:
+                        # ~0.0 means >=0.0.0 and <0.1.0
+                        return Semver(major + '.' + str(int(minor) + 1) + '.0')
+                else:
+                    # ~0.0.1 means >=0.0.1 and <0.1.0
+                    # ~0.1.2 means >=0.1.2 and <0.2.0
+                    # ~1.2.3 means >=1.2.3 and <1.3.0
+                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
+
+            raise RuntimeError('No upper bound')
+        self._upper = find_upper()
+
+    def __repr__(self):
+        return "SemverRange(%s, op=%s, semver=%s, lower=%s, upper=%s)" % (repr(self._input), self._op, self._semver, self._lower, self._upper)
 
     def __str__(self):
-        major, minor, patch, prerelease, build = self.parts_raw()
-        if self['op'] == '*':
-            if self['major'] == '*':
-                return '*'
-            elif self['minor'] == '*':
-                return major + '*'
-            else:
-                return major + '.' + minor + '.*'
-        else:
-            s = self['op']
-            if major is None:
-                s += '0'
-            else:
-                s += major
-            s += '.'
-            if minor is None:
-                s += '0'
-            else:
-                s += minor
-            s += '.'
-            if patch is None:
-                s += '0'
-            else:
-                s += patch
-            if len(self.prerelease):
-                s += '-' + str(self.prerelease)
-            if build is not None:
-                s += '+' + build
-            return s
+        return self._input
 
     def lower(self):
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
-
-        if op in ('<=', '<', '=', '>', '>='):
-            return None
-
-        if op == '*':
-            # wildcards specify a range
-            if self['major'] == '*':
-                return Semver('0.0.0')
-            elif self['minor'] == '*':
-                return Semver(major + '.0.0')
-            elif self['patch'] == '*':
-                return Semver(major + '.' + minor + '.0')
-        elif op == '^':
-            # caret specifies a range
-            if patch is None:
-                if minor is None:
-                    # ^0 means >=0.0.0 and <1.0.0
-                    return Semver(major + '.0.0')
-                else:
-                    # ^0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + minor + '.0')
-            else:
-                # ^0.0.1 means >=0.0.1 and <0.0.2
-                # ^0.1.2 means >=0.1.2 and <0.2.0
-                # ^1.2.3 means >=1.2.3 and <2.0.0
-                if int(major) == 0:
-                    if int(minor) == 0:
-                        # ^0.0.1
-                        return Semver('0.0.' + patch)
-                    else:
-                        # ^0.1.2
-                        return Semver('0.' + minor + '.' + patch)
-                else:
-                    # ^1.2.3
-                    return Semver(major + '.' + minor + '.' + patch)
-        elif op == '~':
-            # tilde specifies a minimal range
-            if patch is None:
-                if minor is None:
-                    # ~0 means >=0.0.0 and <1.0.0
-                    return Semver(major + '.0.0')
-                else:
-                    # ~0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + minor + '.0')
-            else:
-                # ~0.0.1 means >=0.0.1 and <0.1.0
-                # ~0.1.2 means >=0.1.2 and <0.2.0
-                # ~1.2.3 means >=1.2.3 and <1.3.0
-                return Semver(major + '.' + minor + '.' + patch)
-
-        raise RuntimeError('No lower bound')
+        return self._lower
 
     def upper(self):
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
+        return self._upper
 
-        if op in ('<=', '<', '=', '>', '>='):
-            return None
-
-        if op == '*':
-            # wildcards specify a range
-            if self['major'] == '*':
-                return None
-            elif self['minor'] == '*':
-                return Semver(str(int(major) + 1) + '.0.0')
-            elif self['patch'] == '*':
-                return Semver(major + '.' + str(int(minor) + 1) + '.0')
-        elif op == '^':
-            # caret specifies a range
-            if patch is None:
-                if minor is None:
-                    # ^0 means >=0.0.0 and <1.0.0
-                    return Semver(str(int(major) + 1) + '.0.0')
-                else:
-                    # ^0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
-            else:
-                # ^0.0.1 means >=0.0.1 and <0.0.2
-                # ^0.1.2 means >=0.1.2 and <0.2.0
-                # ^1.2.3 means >=1.2.3 and <2.0.0
-                if int(major) == 0:
-                    if int(minor) == 0:
-                        # ^0.0.1
-                        return Semver('0.0.' + str(int(patch) + 1))
-                    else:
-                        # ^0.1.2
-                        return Semver('0.' + str(int(minor) + 1) + '.0')
-                else:
-                    # ^1.2.3
-                    return Semver(str(int(major) + 1) + '.0.0')
-        elif op == '~':
-            # tilde specifies a minimal range
-            if patch is None:
-                if minor is None:
-                    # ~0 means >=0.0.0 and <1.0.0
-                    return Semver(str(int(major) + 1) + '.0.0')
-                else:
-                    # ~0.0 means >=0.0.0 and <0.1.0
-                    return Semver(major + '.' + str(int(minor) + 1) + '.0')
-            else:
-                # ~0.0.1 means >=0.0.1 and <0.1.0
-                # ~0.1.2 means >=0.1.2 and <0.2.0
-                # ~1.2.3 means >=1.2.3 and <1.3.0
-                return Semver(major + '.' + str(int(minor) + 1) + '.0')
-
-        raise RuntimeError('No upper bound')
+    def op_semver(self):
+        return self._op, self._semver
 
     def compare(self, sv):
-        if type(sv) is not Semver:
+        if not isinstance(sv, Semver):
             sv = Semver(sv)
 
-        op = self['op']
-        major,minor,patch,_,_ = self.parts_raw()
-
+        op = self._op
         if op == '*':
-            if self['major'] == '*':
+            if self._semver is not None and self._semver['major'] == '*':
                 return sv >= Semver('0.0.0')
-
-            return (sv >= self.lower()) and (sv < self.upper())
+            if self._lower is not None and sv < self._lower:
+                return False
+            if self._upper is not None and sv >= self._upper:
+                return False
+            return True
         elif op == '^':
-            return (sv >= self.lower()) and (sv < self.upper())
+            return (sv >= self._lower) and (sv < self._upper)
         elif op == '~':
-            return (sv >= self.lower()) and (sv < self.upper())
+            return (sv >= self._lower) and (sv < self._upper)
         elif op == '<=':
             return sv <= self._semver
         elif op == '>=':
@@ -530,71 +548,90 @@ class SemverRange(dict):
 
         raise RuntimeError('Semver comparison failed to find a matching op')
 
+
 def test_semver():
-    print '\ntesting parsing:'
-    print '"1"                    is: "%s"' % Semver("1")
-    print '"1.1"                  is: "%s"' % Semver("1.1")
-    print '"1.1.1"                is: "%s"' % Semver("1.1.1")
-    print '"1.1.1-alpha"          is: "%s"' % Semver("1.1.1-alpha")
-    print '"1.1.1-alpha.1"        is: "%s"' % Semver("1.1.1-alpha.1")
-    print '"1.1.1-alpha+beta"     is: "%s"' % Semver("1.1.1-alpha+beta")
-    print '"1.1.1-alpha.1+beta"   is: "%s"' % Semver("1.1.1-alpha.1+beta")
-    print '"1.1.1-alpha.1+beta.1" is: "%s"' % Semver("1.1.1-alpha.1+beta.1")
+    """
+    Tests for Semver parsing. Run using py.test: py.test bootstrap.py
+    """
+    assert str(Semver("1")) == "1.0.0"
+    assert str(Semver("1.1")) == "1.1.0"
+    assert str(Semver("1.1.1")) == "1.1.1"
+    assert str(Semver("1.1.1-alpha")) == "1.1.1-alpha"
+    assert str(Semver("1.1.1-alpha.1")) == "1.1.1-alpha.1"
+    assert str(Semver("1.1.1-alpha+beta")) == "1.1.1-alpha+beta"
+    assert str(Semver("1.1.1-alpha+beta.1")) == "1.1.1-alpha+beta.1"
 
-    print '\ntesting equality:'
-    print '"1"                    == "1.0.0"                is: %s' % (Semver("1") == Semver("1.0.0"))
-    print '"1.1"                  == "1.1.0"                is: %s' % (Semver("1.1") == Semver("1.1.0"))
-    print '"1.1.1"                == "1.1.1"                is: %s' % (Semver("1.1.1") == Semver("1.1.1"))
-    print '"1.1.1-alpha"          == "1.1.1-alpha"          is: %s' % (Semver("1.1.1-alpha") == Semver("1.1.1-alpha"))
-    print '"1.1.1-alpha.1"        == "1.1.1-alpha.1"        is: %s' % (Semver("1.1.1-alpha.1") == Semver("1.1.1-alpha.1"))
-    print '"1.1.1-alpha+beta"     == "1.1.1-alpha+beta"     is: %s' % (Semver("1.1.1-alpha+beta") == Semver("1.1.1-alpha+beta"))
-    print '"1.1.1-alpha.1+beta"   == "1.1.1-alpha.1+beta"   is: %s' % (Semver("1.1.1-alpha.1+beta") == Semver("1.1.1-alpha.1+beta"))
-    print '"1.1.1-alpha.1+beta.1" == "1.1.1-alpha.1+beta.1" is: %s' % (Semver("1.1.1-alpha.1+beta.1") == Semver("1.1.1-alpha.1+beta.1"))
+def test_semver_eq():
+    assert Semver("1") == Semver("1.0.0")
+    assert Semver("1.1") == Semver("1.1.0")
+    assert Semver("1.1.1") == Semver("1.1.1")
+    assert Semver("1.1.1-alpha") == Semver("1.1.1-alpha")
+    assert Semver("1.1.1-alpha.1") == Semver("1.1.1-alpha.1")
+    assert Semver("1.1.1-alpha+beta") == Semver("1.1.1-alpha+beta")
+    assert Semver("1.1.1-alpha.1+beta") == Semver("1.1.1-alpha.1+beta")
+    assert Semver("1.1.1-alpha.1+beta.1") == Semver("1.1.1-alpha.1+beta.1")
 
-    print '\ntesting less than:'
-    print '"1"                  < "2.0.0"              is: %s' % (Semver("1") < Semver("2.0.0"))
-    print '"1.1"                < "1.2.0"              is: %s' % (Semver("1.1") < Semver("1.2.0"))
-    print '"1.1.1"              < "1.1.2"              is: %s' % (Semver("1.1.1") < Semver("1.1.2"))
-    print '"1.1.1-alpha"        < "1.1.1"              is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1"))
-    print '"1.1.1-alpha"        < "1.1.1-beta"         is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-beta"))
-    print '"1.1.1-1"            < "1.1.1-alpha"        is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-beta"))
-    print '"1.1.1-alpha"        < "1.1.1-alpha.1"      is: %s' % (Semver("1.1.1-alpha") < Semver("1.1.1-alpha.1"))
-    print '"1.1.1-alpha.1"      < "1.1.1-alpha.2"      is: %s' % (Semver("1.1.1-alpha.1") < Semver("1.1.1-alpha.2"))
-    print '"1.1.1-alpha+beta"   < "1.1.1+beta"         is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1+beta"))
-    print '"1.1.1-alpha+beta"   < "1.1.1-beta+beta"    is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta"))
-    print '"1.1.1-1+beta"       < "1.1.1-alpha+beta"   is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta"))
-    print '"1.1.1-alpha+beta"   < "1.1.1-alpha.1+beta" is: %s' % (Semver("1.1.1-alpha+beta") < Semver("1.1.1-alpha.1+beta"))
-    print '"1.1.1-alpha.1+beta" < "1.1.1-alpha.2+beta" is: %s' % (Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta"))
+def test_semver_comparison():
+    assert Semver("1") < Semver("2.0.0")
+    assert Semver("1.1") < Semver("1.2.0")
+    assert Semver("1.1.1") < Semver("1.1.2")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-beta")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-beta")
+    assert Semver("1.1.1-alpha") < Semver("1.1.1-alpha.1")
+    assert Semver("1.1.1-alpha.1") < Semver("1.1.1-alpha.2")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-beta+beta")
+    assert Semver("1.1.1-alpha+beta") < Semver("1.1.1-alpha.1+beta")
+    assert Semver("1.1.1-alpha.1+beta") < Semver("1.1.1-alpha.2+beta")
+    assert Semver("0.5") < Semver("2.0")
+    assert not (Semver("2.0") < Semver("0.5"))
+    assert not (Semver("0.5") > Semver("2.0"))
+    assert not (Semver("0.5") >= Semver("2.0"))
+    assert Semver("2.0") >= Semver("0.5")
+    assert Semver("2.0") > Semver("0.5")
+    assert not (Semver("2.0") > Semver("2.0"))
+    assert not (Semver("2.0") < Semver("2.0"))
 
-    print '\ntesting semver range parsing:'
-    print '"0"      lower: %s, upper: %s' % (SemverRange('0').lower(), SemverRange('0').upper())
-    print '"0.0"    lower: %s, upper: %s' % (SemverRange('0.0').lower(), SemverRange('0.0').upper())
-    print '"0.0.0"  lower: %s, upper: %s' % (SemverRange('0.0.0').lower(), SemverRange('0.0.0').upper())
-    print '"0.0.1"  lower: %s, upper: %s' % (SemverRange('0.0.1').lower(), SemverRange('0.0.1').upper())
-    print '"0.1.1"  lower: %s, upper: %s' % (SemverRange('0.1.1').lower(), SemverRange('0.1.1').upper())
-    print '"1.1.1"  lower: %s, upper: %s' % (SemverRange('1.1.1').lower(), SemverRange('1.1.1').upper())
-    print '"^0"     lower: %s, upper: %s' % (SemverRange('^0').lower(), SemverRange('^0').upper())
-    print '"^0.0"   lower: %s, upper: %s' % (SemverRange('^0.0').lower(), SemverRange('^0.0').upper())
-    print '"^0.0.0" lower: %s, upper: %s' % (SemverRange('^0.0.0').lower(), SemverRange('^0.0.0').upper())
-    print '"^0.0.1" lower: %s, upper: %s' % (SemverRange('^0.0.1').lower(), SemverRange('^0.0.1').upper())
-    print '"^0.1.1" lower: %s, upper: %s' % (SemverRange('^0.1.1').lower(), SemverRange('^0.1.1').upper())
-    print '"^1.1.1" lower: %s, upper: %s' % (SemverRange('^1.1.1').lower(), SemverRange('^1.1.1').upper())
-    print '"~0"     lower: %s, upper: %s' % (SemverRange('~0').lower(), SemverRange('~0').upper())
-    print '"~0.0"   lower: %s, upper: %s' % (SemverRange('~0.0').lower(), SemverRange('~0.0').upper())
-    print '"~0.0.0" lower: %s, upper: %s' % (SemverRange('~0.0.0').lower(), SemverRange('~0.0.0').upper())
-    print '"~0.0.1" lower: %s, upper: %s' % (SemverRange('~0.0.1').lower(), SemverRange('~0.0.1').upper())
-    print '"~0.1.1" lower: %s, upper: %s' % (SemverRange('~0.1.1').lower(), SemverRange('~0.1.1').upper())
-    print '"~1.1.1" lower: %s, upper: %s' % (SemverRange('~1.1.1').lower(), SemverRange('~1.1.1').upper())
-    print '"*"      lower: %s, upper: %s' % (SemverRange('*').lower(), SemverRange('*').upper())
-    print '"0.*"    lower: %s, upper: %s' % (SemverRange('0.*').lower(), SemverRange('0.*').upper())
-    print '"0.0.*"  lower: %s, upper: %s' % (SemverRange('0.0.*').lower(), SemverRange('0.0.*').upper())
+def test_semver_range():
+    def bounds(spec, lowe, high):
+        lowe = Semver(lowe) if lowe is not None else lowe
+        high = Semver(high) if high is not None else high
+        assert SemverRange(spec).lower() == lowe and SemverRange(spec).upper() == high
+    bounds('0',      '0.0.0', '1.0.0')
+    bounds('0.0',    '0.0.0', '0.1.0')
+    bounds('0.0.0',  '0.0.0', '0.0.1')
+    bounds('0.0.1',  '0.0.1', '0.0.2')
+    bounds('0.1.1',  '0.1.1', '0.2.0')
+    bounds('1.1.1',  '1.1.1', '2.0.0')
+    bounds('^0',     '0.0.0', '1.0.0')
+    bounds('^0.0',   '0.0.0', '0.1.0')
+    bounds('^0.0.0', '0.0.0', '0.0.1')
+    bounds('^0.0.1', '0.0.1', '0.0.2')
+    bounds('^0.1.1', '0.1.1', '0.2.0')
+    bounds('^1.1.1', '1.1.1', '2.0.0')
+    bounds('~0',     '0.0.0', '1.0.0')
+    bounds('~0.0',   '0.0.0', '0.1.0')
+    bounds('~0.0.0', '0.0.0', '0.1.0')
+    bounds('~0.0.1', '0.0.1', '0.1.0')
+    bounds('~0.1.1', '0.1.1', '0.2.0')
+    bounds('~1.1.1', '1.1.1', '1.2.0')
+    bounds('*',      '0.0.0', None)
+    bounds('0.*',    '0.0.0', '1.0.0')
+    bounds('0.0.*',  '0.0.0', '0.1.0')
+
+
+def test_semver_multirange():
+    assert SemverRange(">= 0.5, < 2.0").compare("1.0.0")
+    assert SemverRange("*").compare("0.2.7")
 
 
 class Runner(object):
 
     def __init__(self, c, e, cwd=None):
         self._cmd = c
-        if type(self._cmd) is not list:
+        if not isinstance(self._cmd, list):
             self._cmd = [self._cmd]
         self._env = e
         self._stdout = []
@@ -608,15 +645,15 @@ class Runner(object):
         #dbg(' env: %s' % env)
         #dbg(' cwd: %s' % self._cwd)
         envstr = ''
-        for k,v in env.iteritems():
+        for k, v in env.iteritems():
             envstr += ' %s="%s"' % (k, v)
         if self._cwd is not None:
             dbg('cd %s && %s %s' % (self._cwd, envstr, ' '.join(cmd)))
         else:
             dbg('%s %s' % (envstr, ' '.join(cmd)))
 
-        proc = subprocess.Popen(cmd, env=env, \
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+        proc = subprocess.Popen(cmd, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 cwd=self._cwd)
         out, err = proc.communicate()
 
@@ -687,7 +724,7 @@ class BuildScriptRunner(Runner):
                 cmd += ['-L', v]
             elif k == 'rustc-cfg':
                 cmd += ['--cfg', v]
-                env['CARGO_FEATURE_%s' % v.upper().replace('-','_')] = 1
+                env['CARGO_FEATURE_%s' % v.upper().replace('-', '_')] = 1
             else:
                 #dbg("env[%s] = %s" % (k, v));
                 denv[k] = v
@@ -701,9 +738,9 @@ class Crate(object):
         self._dep_info = deps
         self._dir = cdir
         # put the build scripts first
-        self._build = filter(lambda x: x.get('type', None) == 'build_script', build)
+        self._build = [x for x in build if x.get('type') == 'build_script']
         # then add the lib/bin builds
-        self._build += filter(lambda x: x.get('type', None) != 'build_script', build)
+        self._build += [x for x in build if x.get('type') != 'build_script']
         self._resolved = False
         self._deps = {}
         self._refs = []
@@ -727,7 +764,7 @@ class Crate(object):
         return '%s-%s' % (self.name(), self.version())
 
     def add_dep(self, crate, features):
-        if self._deps.has_key(str(crate)):
+        if str(crate) in self._deps:
             return
 
         features = [str(x) for x in features]
@@ -742,13 +779,10 @@ class Crate(object):
         return self._resolved
 
     @dbgCtx
-    def resolve(self, tdir, idir, graph=None):
-        global CRATES
-        global UNRESOLVED
-
+    def resolve(self, tdir, idir, nodl, graph=None):
         if self._resolved:
             return
-        if CRATES.has_key(str(self)):
+        if str(self) in CRATES:
             return
 
         if self._dep_info is not None:
@@ -762,7 +796,7 @@ class Crate(object):
                     continue
 
                 optional = d.get('optional', False)
-                if optional:
+                if optional and d['name'] not in INCLUDE_OPTIONAL:
                     print ''
                     dbg('Skipping optional dep %s' % d['name'])
                     continue
@@ -778,8 +812,13 @@ class Crate(object):
                         #import pdb; pdb.set_trace()
                         svr = dcrate.version().as_range()
                     name, ver, ideps, ftrs, cksum = crate_info_from_index(idir, d['name'], svr)
-                    if dcrate is None:
-                        cdir = dl_and_check_crate(tdir, name, ver, cksum)
+                    if name in BLACKLIST:
+                        dbg('Found in blacklist, skipping %s' % (name))
+                    elif dcrate is None:
+                        if nodl:
+                            cdir = find_downloaded_crate(tdir, name, svr)
+                        else:
+                            cdir = dl_and_check_crate(tdir, name, ver, cksum)
                         _, tver, tdeps, build = crate_info_from_toml(cdir)
                         deps += ideps
                         deps += tdeps
@@ -791,36 +830,37 @@ class Crate(object):
                     name, ver, ideps, build = crate_info_from_toml(cdir)
                     deps += ideps
 
-                try:
-                    if dcrate is None:
-                        dcrate = Crate(name, ver, deps, cdir, build)
-                        if CRATES.has_key(str(dcrate)):
-                            dcrate = CRATES[str(dcrate)]
-                    UNRESOLVED.append(dcrate)
-                    if graph is not None:
-                        print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
+                if name not in BLACKLIST:
+                    try:
+                        if dcrate is None:
+                            dcrate = Crate(name, ver, deps, cdir, build)
+                            if str(dcrate) in CRATES:
+                                dcrate = CRATES[str(dcrate)]
+                        UNRESOLVED.append(dcrate)
+                        if graph is not None:
+                            print >> graph, '"%s" -> "%s";' % (str(self), str(dcrate))
 
-                except:
-                    dcrate = None
+                    except:
+                        dcrate = None
 
                 # clean up the list of features that are enabled
                 tftrs = d.get('features', [])
-                if type(tftrs) is dict:
+                if isinstance(tftrs, dict):
                     tftrs = tftrs.keys()
                 else:
-                    tftrs = filter(lambda x: len(x) > 0, tftrs)
+                    tftrs = [x for x in tftrs if len(x) > 0]
 
                 # add 'default' if default_features is true
                 if d.get('default_features', True):
                     tftrs.append('default')
 
                 features = []
-                if type(ftrs) is dict:
+                if isinstance(ftrs, dict):
                     # add any available features that are activated by the
                     # dependency entry in the parent's dependency record,
                     # and any features they depend on recursively
                     def add_features(f):
-                        if ftrs.has_key(f):
+                        if f in ftrs:
                             for k in ftrs[f]:
                                 # guard against infinite recursion
                                 if not k in features:
@@ -829,7 +869,7 @@ class Crate(object):
                     for k in tftrs:
                         add_features(k)
                 else:
-                    features += filter(lambda x: (len(x) > 0) and (x in tftrs), ftrs)
+                    features += [x for x in ftrs if (len(x) > 0) and (x in tftrs)]
 
                 if dcrate is not None:
                     self.add_dep(dcrate, features)
@@ -839,22 +879,17 @@ class Crate(object):
 
     @dbgCtx
     def build(self, by, out_dir, features=[]):
-        global BUILT
-        global CRATES
-        global TARGET
-        global HOST
-
         extra_filename = '-' + str(self.version()).replace('.','_')
         output_name = self.name().replace('-','_')
         output = os.path.join(out_dir, 'lib%s%s.rlib' % (output_name, extra_filename))
 
-        if BUILT.has_key(str(self)):
+        if str(self) in BUILT:
             return ({'name':self.name(), 'lib':output}, self._env, self._extra_flags)
 
         externs = []
         extra_flags = []
         for dep,info in self._deps.iteritems():
-            if CRATES.has_key(dep):
+            if dep in CRATES:
                 extern, env, extra_flags = CRATES[dep].build(self, out_dir, info['features'])
                 externs.append(extern)
                 self._dep_env[CRATES[dep].name()] = env
@@ -902,6 +937,7 @@ class Crate(object):
             cmd.append(os.path.join(self._dir, b['path']))
             cmd.append('--crate-name')
             if b['type'] == 'lib':
+                b.setdefault('name', self.name())
                 cmd.append(b['name'].replace('-','_'))
                 cmd.append('--crate-type')
                 cmd.append('lib')
@@ -980,41 +1016,31 @@ class Crate(object):
         BUILT[str(self)] = str(by)
         return ({'name':self.name(), 'lib':output}, self._env, bcmd)
 
-@idnt
+
 def dl_crate(url, depth=0):
     if depth > 10:
         raise RuntimeError('too many redirects')
 
-    loc = urlparse.urlparse(url)
-    if loc.scheme == 'https':
-        conn = httplib.HTTPSConnection(loc.netloc)
-    elif loc.scheme == 'http':
-        conn = httplib.HTTPConnection(loc.netloc)
-    else:
-        raise RuntimeError('unsupported url scheme: %s' % loc.scheme)
+    r = requests.get(url)
+    try:
+        dbg('%sconnected to %s...%s' % ((' ' * depth), r.url, r.status_code))
 
-    conn.request("GET", loc.path)
-    res = conn.getresponse()
-    dbg('%sconnected to %s...%s' % ((' ' * depth), url, res.status))
-    headers = dict(res.getheaders())
-    if headers.has_key('location') and headers['location'] != url:
-        return dl_crate(headers['location'], depth + 1)
+        if URLS_FILE is not None:
+            with open(URLS_FILE, "a") as f:
+                f.write(r.url + "\n")
 
-    return res.read()
+        return r.content
+    finally:
+        r.close()
 
-@idnt
 def dl_and_check_crate(tdir, name, ver, cksum):
-    global CRATES
     cname = '%s-%s' % (name, ver)
     cdir = os.path.join(tdir, cname)
-    if CRATES.has_key(cname):
+    if cname in CRATES:
         dbg('skipping %s...already downloaded' % cname)
         return cdir
 
-    if not os.path.isdir(cdir):
-        dbg('Downloading %s source to %s' % (cname, cdir))
-        dl = CRATE_API_DL % (name, ver)
-        buf = dl_crate(dl)
+    def check_checksum(buf):
         if (cksum is not None):
             h = hashlib.sha256()
             h.update(buf)
@@ -1023,6 +1049,28 @@ def dl_and_check_crate(tdir, name, ver, cksum):
             else:
                 dbg('Checksum is BAD (%s != %s)' % (h.hexdigest(), cksum))
 
+    if CRATE_CACHE:
+        cachename = os.path.join(CRATE_CACHE, "%s.crate" % (cname))
+        if os.path.isfile(cachename):
+            dbg('found crate in cache...%s.crate' % (cname))
+            buf = open(cachename).read()
+            check_checksum(buf)
+            with tarfile.open(fileobj=cStringIO.StringIO(buf)) as tf:
+                dbg('unpacking result to %s...' % cdir)
+                tf.extractall(path=tdir)
+            return cdir
+
+    if not os.path.isdir(cdir):
+        dbg('Downloading %s source to %s' % (cname, cdir))
+        dl = CRATE_API_DL % (name, ver)
+        buf = dl_crate(dl)
+        check_checksum(buf)
+
+        if CRATE_CACHE:
+            dbg("saving crate to %s/%s.crate..." % (CRATE_CACHE, cname))
+            with open(os.path.join(CRATE_CACHE, "%s.crate" % (cname)), "wb") as f:
+                f.write(buf)
+
         fbuf = cStringIO.StringIO(buf)
         with tarfile.open(fileobj=fbuf) as tf:
             dbg('unpacking result to %s...' % cdir)
@@ -1030,7 +1078,24 @@ def dl_and_check_crate(tdir, name, ver, cksum):
 
     return cdir
 
-@idnt
+
+def find_downloaded_crate(tdir, name, svr):
+    exists = glob("%s/%s-[0-9]*" % (tdir, name))
+    if not exists:
+        raise RuntimeError("crate does not exist and have --no-download: %s" % name)
+
+    # First, grok the available versions.
+    aver = sorted([Semver(CVER.search(x).group(1)) for x in exists])
+
+    # Now filter the "suitable" versions based on our version range.
+    sver = filter(svr.compare, aver)
+    if not sver:
+        raise RuntimeError("unable to satisfy dependency %s %s from %s; try running without --no-download" % (name, svr, map(str, aver)))
+
+    cver = sver[-1]
+    return "%s/%s-%s" % (tdir, name, cver)
+
+
 def crate_info_from_toml(cdir):
     try:
         with open(os.path.join(cdir, 'Cargo.toml'), 'rb') as ctoml:
@@ -1129,7 +1194,7 @@ def crate_info_from_toml(cdir):
             for k,v in d.iteritems():
                 if type(v) is not dict:
                     deps.append({'name':k, 'req': v})
-                elif v.has_key('path'):
+                elif 'path' in v:
                     if v.get('version', None) is None:
                         deps.append({'name':k, 'path':os.path.join(cdir, v['path']), 'local':True, 'req':0})
                     else:
@@ -1144,15 +1209,13 @@ def crate_info_from_toml(cdir):
             return (name, ver, deps, build)
 
     except Exception, e:
-        import pdb; pdb.set_trace()
         dbg('failed to load toml file for: %s (%s)' % (cdir, str(e)))
+        import pdb; pdb.set_trace()
 
     return (None, None, [], 'lib.rs')
 
-@idnt
-def crate_info_from_index(idir, name, svr):
-    global TARGET
 
+def crate_info_from_index(idir, name, svr):
     if len(name) == 1:
         ipath = os.path.join(idir, '1', name)
     elif len(name) == 2:
@@ -1171,7 +1234,7 @@ def crate_info_from_index(idir, name, svr):
 
     passed = {}
     for info in dep_infos:
-        if not info.has_key('vers'):
+        if 'vers' not in info:
             continue
         sv = Semver(info['vers'])
         if svr.compare(sv):
@@ -1188,13 +1251,12 @@ def crate_info_from_index(idir, name, svr):
     cksum = best_info.get('cksum', None)
 
     # only include deps without a 'target' or ones with matching 'target'
-    deps = filter(lambda x: x.get('target', TARGET) == TARGET, deps)
+    deps = [x for x in deps if x.get('target', TARGET) == TARGET]
 
     return (name, ver, deps, ftrs, cksum)
 
+
 def find_crate_by_name_and_semver(name, svr):
-    global CRATES
-    global UNRESOLVED
     for c in CRATES.itervalues():
         if c.name() == name and svr.compare(c.version()):
             return c
@@ -1202,6 +1264,7 @@ def find_crate_by_name_and_semver(name, svr):
         if c.name() == name and svr.compare(c.version()):
             return c
     return None
+
 
 def args_parser():
     parser = argparse.ArgumentParser(description='Cargo Bootstrap Tool')
@@ -1215,21 +1278,31 @@ def args_parser():
                         help="target triple for machine we're bootstrapping for")
     parser.add_argument('--host', type=str, default=None,
                         help="host triple for machine we're bootstrapping on")
-    parser.add_argument('--test-semver', action='store_true',
-                        help="run semver parsing tests")
     parser.add_argument('--no-clone', action='store_true',
-                        help="skip cloning crates index, --target-dir must point to an existing clone of the crates index")
+                        help="skip cloning crates index, --crate-index must point to an existing clone of the crates index")
     parser.add_argument('--no-git', action='store_true',
                         help="don't assume that the crates index and cargo root are git repos; implies --no-clone")
     parser.add_argument('--no-clean', action='store_true',
                         help="don't delete the target dir and crate index")
     parser.add_argument('--download', action='store_true',
                         help="only download the crates needed to build cargo")
+    parser.add_argument('--no-download', action='store_true',
+                        help="don't download any crates (fail if any do not exist)")
     parser.add_argument('--graph', action='store_true',
                         help="output a dot graph of the dependencies")
+    parser.add_argument('--urls-file', type=str, default=None,
+                        help="file to write crate URLs to")
+    parser.add_argument('--blacklist', type=str, default="",
+                        help="space-separated list of crates to skip")
+    parser.add_argument('--include-optional', type=str, default="",
+                        help="space-separated list of optional crates to include")
+    parser.add_argument('--patchdir', type=str,
+                        help="directory with patches to apply after downloading crates. organized by crate/NNNN-description.patch")
+    parser.add_argument('--crate-cache', type=str,
+                        help="download and save crates to crate cache (directory)")
     return parser
 
-@idnt
+
 def open_or_clone_repo(rdir, rurl, no_clone):
     try:
         repo = git.open_repo(rdir)
@@ -1241,17 +1314,52 @@ def open_or_clone_repo(rdir, rurl, no_clone):
         dbg('Cloning %s to %s' % (rurl, rdir))
         return git.clone(rurl, rdir)
 
+    if repo is None and no_clone is True:
+        repo = rdir
+
     return repo
+
+
+def patch_crates(targetdir, patchdir):
+    """
+    Apply patches in patchdir to downloaded crates
+    patchdir organization:
+
+    <patchdir>/
+      <crate>/
+        <patch>.patch
+    """
+    for patch in glob(os.path.join(patchdir, '*', '*.patch')):
+        crateid = os.path.basename(os.path.dirname(patch))
+        m = re.match(r'^([A-Za-z0-9_-]+?)(?:-([\d.]+))?$', crateid)
+        if m:
+            cratename = m.group(1)
+        else:
+            cratename = crateid
+        if cratename != crateid:
+            dirs = glob(os.path.join(targetdir, crateid))
+        else:
+            dirs = glob(os.path.join(targetdir, '%s-*' % (cratename)))
+        for cratedir in dirs:
+            # check if patch has been applied
+            patchpath = os.path.abspath(patch)
+            p = subprocess.Popen(['patch', '--dry-run', '-s', '-f', '-F', '10', '-p1', '-i', patchpath], cwd=cratedir)
+            rc = p.wait()
+            if rc == 0:
+                dbg("patching %s with patch %s" % (os.path.basename(cratedir), os.path.basename(patch)))
+                p = subprocess.Popen(['patch', '-s', '-F', '10', '-p1', '-i', patchpath], cwd=cratedir)
+                rc = p.wait()
+                if rc != 0:
+                    dbg("%s: failed to apply %s (rc=%s)" % (os.path.basename(cratedir), os.path.basename(patch), rc))
+            else:
+                dbg("%s: %s does not apply (rc=%s)" % (os.path.basename(cratedir), os.path.basename(patch), rc))
+
 
 if __name__ == "__main__":
     try:
         # parse args
         parser = args_parser()
         args = parser.parse_args()
-
-        if args.test_semver:
-            test_semver()
-            sys.exit(0)
 
         # clone the cargo index
         if args.crate_index is None:
@@ -1261,6 +1369,11 @@ if __name__ == "__main__":
 
         TARGET = args.target
         HOST = args.host
+        URLS_FILE = args.urls_file
+        BLACKLIST = args.blacklist.split()
+        INCLUDE_OPTIONAL = args.include_optional.split()
+        if args.crate_cache and os.path.isdir(args.crate_cache):
+            CRATE_CACHE = os.path.abspath(args.crate_cache)
 
         if not args.no_git:
             index = open_or_clone_repo(args.crate_index, CRATES_INDEX, args.no_clone)
@@ -1284,6 +1397,7 @@ if __name__ == "__main__":
         print >> sys.stderr, "\nException:\n from %s, line %d:\n %s\n" % (frame[1], frame[2], e)
         parser.print_help()
         if not args.no_clean:
+            print "cleaning up %s" % (args.target_dir)
             shutil.rmtree(args.target_dir)
         sys.exit(1)
 
@@ -1305,11 +1419,18 @@ if __name__ == "__main__":
         print '===================================='
         while len(UNRESOLVED) > 0:
             crate = UNRESOLVED.pop(0)
-            crate.resolve(args.target_dir, args.crate_index, GRAPH)
+            crate.resolve(args.target_dir, args.crate_index, args.no_download, GRAPH)
 
         if args.graph:
             print >> GRAPH, "}"
             GRAPH.close()
+
+        if args.patchdir:
+            print ''
+            print '========================'
+            print '===== PATCH CRATES ====='
+            print '========================'
+            patch_crates(args.target_dir, args.patchdir)
 
         if args.download:
             print "done downloading..."
@@ -1324,7 +1445,7 @@ if __name__ == "__main__":
 
         # cleanup
         if not args.no_clean:
-            print "cleaning up..."
+            print "cleaning up %s..." % (args.target_dir)
             shutil.rmtree(args.target_dir)
         print "done"
 
@@ -1332,6 +1453,7 @@ if __name__ == "__main__":
         frame = inspect.trace()[-1]
         print >> sys.stderr, "\nException:\n from %s, line %d:\n %s\n" % (frame[1], frame[2], e)
         if not args.no_clean:
+            print "cleaning up %s..." % (args.target_dir)
             shutil.rmtree(args.target_dir)
         sys.exit(1)
 
