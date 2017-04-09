@@ -724,7 +724,7 @@ class BuildScriptRunner(Runner):
                 cmd += ['-L', v]
             elif k == 'rustc-cfg':
                 cmd += ['--cfg', v]
-                env['CARGO_FEATURE_%s' % v.upper().replace('-', '_')] = 1
+                env['CARGO_FEATURE_%s' % v.upper().replace('-', '_')] = '1'
             else:
                 #dbg("env[%s] = %s" % (k, v));
                 denv[k] = v
